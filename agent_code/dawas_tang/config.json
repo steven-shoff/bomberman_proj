@@ -1,13 +1,13 @@
 {
   "training":{
     "models_folder":"agent_code/dawas_tang/models",
-    "model_name":"pretrained_model.h5",
-    "save_model":"first_model.h5"
+    "model_name":"",
+    "save_model":"first_model.h5",
     "weights_path":"",
     "pretrained":0
   },
   "playing":{
-    "eps":0.33,
+    "eps":0.4,
     "eps_discount":0.95
   },
   "workflow":{

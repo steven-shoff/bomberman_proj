@@ -23,10 +23,13 @@ class GainExperience(object):
         self.discount_rate = discount_rate
         self.experience_buffer = list()
         self.model = model
-        self.inputs = np.zeros((self.max_memory_size, 289))
-        self.targets = np.zeros((self.max_memory_size, len(s.actions)))
+        # self.inputs = np.zeros((self.max_memory_size, 289))
+        # self.targets = np.zeros((self.max_memory_size, len(s.actions)))
+        self.inputs = list()
+        self.targets = list()
         self.current_state = None
         self.experiences_count = -1
+        self.rounds_count = 0
 
     def expand_experience(self, experience, exit_game=False):
         # Recieved experience is: [action_selected, reward_earned, next_state]
@@ -36,20 +39,32 @@ class GainExperience(object):
         # Compute the target value for this state and add it directly into the training data buffers
         self.experiences_count += 1
         self.calculate_targets(experience, exit_game=exit_game)
+        if exit_game:
+            self.rounds_count += 1
+        if self.rounds_count == 10:
+            print(self.rounds_count)
+            print(np.count_nonzero(self.targets,axis=0))
+            print(self.experiences_count)
+            print(self.targets[:self.experiences_count+5])
 
     def calculate_targets(self, experience, exit_game=False):
         current_state, action_selected, rewards_earned, next_state = experience
+        target = [0]*len(s.actions)
         if not exit_game:
             max_predict = np.max(self.model.predict(next_state)[0])
-            target = rewards_earned + self.discount_rate * max_predict
+            target[action_selected] = rewards_earned + self.discount_rate * max_predict
         else:
-            target = rewards_earned
-        self.targets[self.experiences_count, action_selected] = target
-        self.inputs[self.experiences_count] = current_state
+            target[action_selected] = rewards_earned
+        # self.targets[self.experiences_count, action_selected] = target
+        # self.inputs[self.experiences_count] = current_state
+        self.targets.append(target)
+        self.inputs.append(current_state)
 
         if len(self.inputs) > self.max_memory_size:
             del self.inputs[0]
             del self.targets[0]
+
+
 
     def predict_action(self,current_state):
         prediction = self.model.predict(current_state)[0]
@@ -131,7 +146,7 @@ def act(agent):
             ths = int(agent.eps * 100)
             if rnd < ths:
                 agent.logger.info('Selecting action at Random for exploring...')
-                agent.next_action = np.random.choice(['RIGHT', 'LEFT', 'UP', 'DOWN', 'BOMB'], p=[.2, .2, .2, .2, .2])
+                agent.next_action = np.random.choice(['RIGHT', 'LEFT', 'UP', 'DOWN', 'BOMB','WAIT'])
             else:
                 prediction = agent.model.predict(current_state)[0]
                 action_idx = np.argmax(prediction)
@@ -139,6 +154,7 @@ def act(agent):
         else:
             prediction = agent.model.predict(current_state)[0]
             action_idx = np.argmax(prediction)
+            print(action_idx)
             agent.next_action = s.actions[action_idx]
 
     except Exception as e:
@@ -157,10 +173,12 @@ def end_of_episode(agent):
     # add the last experience to the buffer in GainExperience object
     send_to_experience(agent, exit_game=True)
 
-    train(agent)
+    if agent.experience.rounds_count == s.n_rounds:
+        train(agent, last_round = True)
+    else:
+        train(agent)
 
     agent.eps *= agent.config["playing"]["eps_discount"]
-    pass
 
 
 def send_to_experience(agent, exit_game=False):
@@ -185,6 +203,7 @@ def send_to_experience(agent, exit_game=False):
     agent.experience.expand_experience(new_experience, exit_game=exit_game)
 
 
+
 def formulate_state(state):
     # Extracting info about the game
     arena = state['arena']
@@ -207,10 +226,10 @@ def formulate_state(state):
         arena[coin] = 4
 
     for bomb_idx, bomb in enumerate(bombs):
-        arena[bomb] = bombs_times[bomb_idx] * 10 + 10
+        arena[bomb] = bombs_times[bomb_idx] * 10
 
     explosions_locations = np.nonzero(explosions)
-    arena[explosions_locations] = explosions[explosions_locations] * 100 + 11
+    arena[explosions_locations] = explosions[explosions_locations] * 100
 
     return arena.flatten().reshape((-1,289))
 
@@ -224,11 +243,12 @@ def compute_reward(events):
     return total_reward
 
 
-def train(agent):
-    inputs = agent.experience.get_inputs()
-    targets = agent.experience.get_targets()
-    history = agent.model.fit(x=inputs,y=targets,epochs=100)
+def train(agent,last_round=False):
+    inputs = np.array(agent.experience.get_inputs()).reshape((-1,289))
+    targets = np.array(agent.experience.get_targets())
+    history = agent.model.fit(x=inputs,y=targets,epochs=10)
 
-    saved_model_path = os.path.join(agent.config['training']['models_folder'],
+    if last_round:
+        saved_model_path = os.path.join(agent.config['training']['models_folder'],
                  agent.config['training']['save_model'])
-    agent.model.save(saved_model_path)
+        agent.model.save(saved_model_path)

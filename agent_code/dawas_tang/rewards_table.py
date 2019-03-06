@@ -12,7 +12,7 @@ rewards = {
     'BOMB_EXPLODED': 0,
 
     'CRATE_DESTROYED': 1,
-    'COIN_FOUND': 2,
+    'COIN_FOUND': 0,
     'COIN_COLLECTED':3,
 
     'KILLED_OPPONENT': 10,
