@@ -110,3 +110,6 @@ screenshots/*.mp4
 screenshots/*.webm
 
 replays/
+
+# models
+agent_code/dawas_tang/models/*
