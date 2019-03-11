@@ -8,17 +8,17 @@ rewards = {
     'INTERRUPTED': 0,
     'INVALID_ACTION': -2,
 
-    'BOMB_DROPPED': 0,
+    'BOMB_DROPPED': -1,
     'BOMB_EXPLODED': 0,
 
-    'CRATE_DESTROYED': 1,
+    'CRATE_DESTROYED': 30,
     'COIN_FOUND': 0,
-    'COIN_COLLECTED':3,
+    'COIN_COLLECTED':60,
 
-    'KILLED_OPPONENT': 10,
-    'KILLED_SELF': -100,
+    'KILLED_OPPONENT': 100,
+    'KILLED_SELF': 0,
 
-    'GOT_KILLED': -50,
+    'GOT_KILLED': -300,
     'OPPONENT_ELIMINATED': 0,
     'SURVIVED_ROUND':0,
 }

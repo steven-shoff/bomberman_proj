@@ -5,6 +5,12 @@ from time import time, sleep
 from collections import deque
 
 from settings import s
+import json
+import os
+from agent_code.dawas_tang.nn_model import  *
+from agent_code.dawas_tang.callbacks import send_to_experience,\
+    compute_reward,formulate_state,train,GainExperience
+import sys
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -74,6 +80,29 @@ def setup(self):
     # While this timer is positive, agent will not hunt/attack opponents
     self.ignore_others_timer = 0
 
+    with open('agent_code/dawas_tang/config.json') as f:
+        self.config = json.load(f)
+
+    if self.config['workflow']['simple_train']:
+        if self.config["training"]["pretrained"]:
+            # read the path of the model to be loaded
+
+            self.pretrained_model_path = os.path.join(self.config['training']['models_folder'],
+                                                       self.config['training']['model_name'])
+            try:
+                self.model = read_model(self.pretrained_model_path)
+            # read_model method raises exceptions to be caught here
+            except FileNotFoundError:
+                self.logger.info("No model is specified to load")
+                sys.exit(-1)
+            except Exception:
+                self.logger.info("An error occured in loading the model")
+                sys.exit(-1)
+        else:
+            # build model to be trained from scratch if no pre-trained weights specified
+            self.model = build_model()
+    self.experience = GainExperience(model=self.model,memory_size=1000,discount_rate=0.99)
+
 
 def act(self):
     """Called each game step to determine the agent's next action.
@@ -89,6 +118,11 @@ def act(self):
     of self.next_action will be used. The default value is 'WAIT'.
     """
     self.logger.info('Picking action according to rule set')
+
+    if self.config['workflow']['simple_train']:
+        state = self.game_state
+        current_state = formulate_state(state)
+        self.experience.current_state = current_state
 
     # Gather information about the game state
     arena = self.game_state['arena']
@@ -214,6 +248,7 @@ def reward_update(self):
     contrast to act, this method has no time limit.
     """
     self.logger.debug(f'Encountered {len(self.events)} game event(s)')
+    send_to_experience(self)
 
 
 def end_of_episode(self):
@@ -224,3 +259,12 @@ def end_of_episode(self):
     final step. You should place your actual learning code in this method.
     """
     self.logger.debug(f'Encountered {len(self.events)} game event(s) in final step')
+
+    send_to_experience(self,exit_game=True)
+
+    if self.experience.rounds_count == s.n_rounds:
+        train(self,last_round=True)
+    else:
+        train(self)
+
+    self.eps *= self.config["playing"]["eps_discount"]

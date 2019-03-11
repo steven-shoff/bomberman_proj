@@ -43,10 +43,10 @@ def main():
     world = BombeRLeWorld([
             # ('my_agent', False),
             # ('simple_agent', False),
-            # ('simple_agent', False),
-            ('dawas_tang', True)
+            ('simple_agent', True)
+            # ('dawas_tang', False)
         ])
-    # world = ReplayWorld('Replay 2019-01-30 16:57:42')
+    # world = ReplayWorld('Replay 2019-03-08 11-12-16')
     user_inputs = []
 
     # Start game logic thread

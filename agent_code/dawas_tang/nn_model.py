@@ -1,5 +1,6 @@
 from keras.models import Sequential,load_model
 from keras.layers import Dense
+from keras.callbacks import Callback
 
 from settings import s
 
@@ -24,3 +25,11 @@ def read_model(model_name):
         raise FileNotFoundError(f'No Model file is found with name: {model_name}')
     model = load_model(model_name)
     return model
+
+class recordHistory(Callback):
+    def on_train_begin(self, logs={}):
+        self.losses = []
+
+    def on_epoch_end(self, logs=None):
+        self.losses.append(logs.get('loss'))
+

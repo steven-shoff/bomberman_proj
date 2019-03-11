@@ -1,4 +1,4 @@
-
+import time
 import numpy as np
 from time import sleep
 from agent_code.dawas_tang.nn_model import *
@@ -8,6 +8,7 @@ from random import randint
 from .rewards_table import rewards
 import sys
 import os
+import matplotlib.pyplot as plt
 
 class GainExperience(object):
     def __init__(self, model, memory_size, discount_rate):
@@ -36,16 +37,17 @@ class GainExperience(object):
         # updating the experience and add the current_state to it
         experience.insert(0,self.current_state)
 
+        assert (not np.array_equal(experience[0], experience[1])),'old experience and new experience are exactly the same'
         # Compute the target value for this state and add it directly into the training data buffers
         self.experiences_count += 1
         self.calculate_targets(experience, exit_game=exit_game)
         if exit_game:
             self.rounds_count += 1
-        if self.rounds_count == 10:
-            print(self.rounds_count)
-            print(np.count_nonzero(self.targets,axis=0))
-            print(self.experiences_count)
-            print(self.targets[:self.experiences_count+5])
+        # if self.rounds_count == 10:
+        #     print(self.rounds_count)
+        #     print(np.count_nonzero(self.targets,axis=0))
+        #     print(self.experiences_count)
+        #     print(self.targets[:self.experiences_count+5])
 
     def calculate_targets(self, experience, exit_game=False):
         current_state, action_selected, rewards_earned, next_state = experience
@@ -124,8 +126,6 @@ def setup(agent):
     experience = GainExperience(model=agent.model,memory_size=s.max_steps,discount_rate=0.99)
     agent.experience = experience
 
-    eps = agent.config["playing"]["eps"]
-    agent.eps = eps
 
 def act(agent):
 
@@ -173,10 +173,7 @@ def end_of_episode(agent):
     # add the last experience to the buffer in GainExperience object
     send_to_experience(agent, exit_game=True)
 
-    if agent.experience.rounds_count == s.n_rounds:
-        train(agent, last_round = True)
-    else:
-        train(agent)
+    train(agent)
 
     agent.eps *= agent.config["playing"]["eps_discount"]
 
@@ -206,14 +203,13 @@ def send_to_experience(agent, exit_game=False):
 
 def formulate_state(state):
     # Extracting info about the game
-    arena = state['arena']
-    self_xy = state['self'][0:2][::-1]
-    others = [(x,y)[::-1] for (x,y,n,b) in state['others']]
-    bombs = [(x,y)[::-1] for (x,y,t) in state['bombs']]
+    arena = state['arena'].copy()
+    self_xy = state['self'][0:2]
+    others = [(x,y) for (x,y,n,b,_) in state['others']]
+    bombs = [(x,y) for (x,y,t) in state['bombs']]
     bombs_times = [t for (x,y,t) in state['bombs']]
     explosions = state['explosions']
-    coins = [coin[::-1] for coin in state['coins']]
-
+    coins = [coin for coin in state['coins']]
     # Enriching the arena with info about own locations, bombs, explosions, opponent positions etc.
     # indicating the location of the player himself
     arena[self_xy] = 3
@@ -226,12 +222,12 @@ def formulate_state(state):
         arena[coin] = 4
 
     for bomb_idx, bomb in enumerate(bombs):
-        arena[bomb] = bombs_times[bomb_idx] * 10
+        arena[bomb] = (bombs_times[bomb_idx] + 1) * 10
 
     explosions_locations = np.nonzero(explosions)
     arena[explosions_locations] = explosions[explosions_locations] * 100
 
-    return arena.flatten().reshape((-1,289))
+    return arena.T.flatten().reshape((-1,289))
 
 
 def compute_reward(events):
@@ -243,12 +239,16 @@ def compute_reward(events):
     return total_reward
 
 
-def train(agent,last_round=False):
+def train(agent):
     inputs = np.array(agent.experience.get_inputs()).reshape((-1,289))
     targets = np.array(agent.experience.get_targets())
-    history = agent.model.fit(x=inputs,y=targets,epochs=10)
-
-    if last_round:
+    print(f'Start training after round number: {agent.experience.rounds_count}')
+    start = time.time()
+    agent.training_history = agent.model.fit(x=inputs,y=targets,epochs=30)
+    end = time.time()
+    print(f'Finish training after round number: {agent.experience.rounds_count}, time lapsed: {end-start}')
+    is_save = True if agent.experience.rounds_count % 1000 == 0 else False
+    if is_save:
         saved_model_path = os.path.join(agent.config['training']['models_folder'],
                  agent.config['training']['save_model'])
         agent.model.save(saved_model_path)
