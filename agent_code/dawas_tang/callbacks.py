@@ -8,7 +8,7 @@ from random import randint
 from .rewards_table import rewards
 import sys
 import os
-import matplotlib.pyplot as plt
+from keras.callbacks import ModelCheckpoint,TensorBoard
 
 class GainExperience(object):
     def __init__(self, model, memory_size, discount_rate):
@@ -22,15 +22,20 @@ class GainExperience(object):
 
         self.max_memory_size = memory_size
         self.discount_rate = discount_rate
-        self.experience_buffer = list()
         self.model = model
-        # self.inputs = np.zeros((self.max_memory_size, 289))
-        # self.targets = np.zeros((self.max_memory_size, len(s.actions)))
         self.inputs = list()
         self.targets = list()
         self.current_state = None
         self.experiences_count = -1
         self.rounds_count = 0
+        self.ckpt = ModelCheckpoint('agent_code/dawas_tang/models/ckpt/dawas_tang_model_{epoch:02d}-{val_loss:.2f}.h5',
+                                     save_best_only=True, period=1000)
+        # self.tb = TensorBoard(log_dir='agent_code/dawas_tang/tensorboard_logs/dawas_tang',update_freq=10000)
+
+        with open('agent_code/dawas_tang/config.json') as f:
+            config = json.load(f)
+
+        self.config = config
 
     def expand_experience(self, experience, exit_game=False):
         # Recieved experience is: [action_selected, reward_earned, next_state]
@@ -41,24 +46,32 @@ class GainExperience(object):
         # Compute the target value for this state and add it directly into the training data buffers
         self.experiences_count += 1
         self.calculate_targets(experience, exit_game=exit_game)
+
+        inputs = np.array(self.get_inputs()).reshape((-1, 289))
+        targets = np.array(self.get_targets())
+
+        start = time.time()
+        self.training_history = self.model.fit(x=inputs, y=targets, validation_split=0.1, epochs=10,
+                                                            verbose=1, callbacks=[self.ckpt])
+        end = time.time()
+        if self.rounds_count % 100 == 0:
+            print(f'Finish training after round number: {self.rounds_count}, time elapsed: {end-start}'
+                  f'\nSaving model')
+            saved_model_path = os.path.join(self.config['training']['models_folder'],
+                                            self.config['training']['save_model'])
+            self.model.save(saved_model_path)
         if exit_game:
-            self.rounds_count += 1
-        # if self.rounds_count == 10:
-        #     print(self.rounds_count)
-        #     print(np.count_nonzero(self.targets,axis=0))
-        #     print(self.experiences_count)
-        #     print(self.targets[:self.experiences_count+5])
+            print(f'Round # {self.rounds_count} finished')
+
 
     def calculate_targets(self, experience, exit_game=False):
         current_state, action_selected, rewards_earned, next_state = experience
         target = [0]*len(s.actions)
         if not exit_game:
-            max_predict = np.max(self.model.predict(next_state)[0])
+            max_predict = np.max(self.predict(next_state)[0])
             target[action_selected] = rewards_earned + self.discount_rate * max_predict
         else:
             target[action_selected] = rewards_earned
-        # self.targets[self.experiences_count, action_selected] = target
-        # self.inputs[self.experiences_count] = current_state
         self.targets.append(target)
         self.inputs.append(current_state)
 
@@ -68,10 +81,9 @@ class GainExperience(object):
 
 
 
-    def predict_action(self,current_state):
+    def predict(self,current_state):
         prediction = self.model.predict(current_state)[0]
-        action_idx = np.argmax(prediction)
-        return action_idx
+        return prediction
 
     def get_inputs(self):
         return self.inputs
@@ -92,16 +104,15 @@ def setup(agent):
     # load the flag of using pretrained weights
     load_pretrained = agent.config["training"]["pretrained"]
 
-    agent.pretrained_model_path = os.path.join(agent.config['training']['models_folder'],
-                                              agent.config['training']['model_name'])
-
     # if in training mode, we have two options: train from scratch or load weights
     if agent.config['workflow']['train']:
         if load_pretrained:
             # read the path of the model to be loaded
 
             try:
-                agent.model = read_model(agent.pretrained_model_path)
+                pretrained_model_path = os.path.join(agent.config['training']['models_folder'],
+                                                     agent.config['training']['model_name'])
+                model = read_model(pretrained_model_path)
             # read_model method raises exceptions to be caught here
             except FileNotFoundError:
                 agent.logger.info("No model is specified to load")
@@ -111,19 +122,23 @@ def setup(agent):
                 sys.exit(-1)
         else:
             # build model to be trained from scratch if no pre-trained weights specified
-            agent.model = build_model()
+            model = build_model()
     else:
         try:
-
-            agent.model = read_model(agent.pretrained_model_path)
+            pretrained_model_path = os.path.join(agent.config['training']['models_folder'],
+                                                 agent.config['training']['model_name'])
+            agent.model = read_model(pretrained_model_path)
         except FileNotFoundError:
-            agent.logger.info(f"Model file is not found, file name: {agent.pretrained_model_path}")
+            agent.logger.info(f"Model file is not found, file name: {pretrained_model_path}")
             sys.exit(-1)
         except Exception:
             agent.logger.info("An error occured in loading the model")
             sys.exit(-1)
 
-    experience = GainExperience(model=agent.model,memory_size=s.max_steps,discount_rate=0.99)
+    agent.eps = agent.config["playing"]["eps"]
+
+    max_memory_size = agent.config['training']['max_memory_size']
+    experience = GainExperience(model=model,memory_size=max_memory_size,discount_rate=0.9)
     agent.experience = experience
 
 
@@ -134,21 +149,21 @@ def act(agent):
 
     try:
         state = agent.game_state
-
+        if state['step'] == 1:
+            agent.experience.rounds_count += 1
         current_state = formulate_state(state)
         agent.logger.info(f'current state from act: {current_state}')
 
         if agent.config['workflow']['train']:
             agent.experience.current_state = current_state
-            if state['step'] == 1:
-                agent.eps = agent.config["playing"]["eps"]
+
             rnd = randint(1, 100)
             ths = int(agent.eps * 100)
             if rnd < ths:
                 agent.logger.info('Selecting action at Random for exploring...')
                 agent.next_action = np.random.choice(['RIGHT', 'LEFT', 'UP', 'DOWN', 'BOMB','WAIT'])
             else:
-                prediction = agent.model.predict(current_state)[0]
+                prediction = agent.experience.predict(current_state)[0]
                 action_idx = np.argmax(prediction)
                 agent.next_action = s.actions[action_idx]
         else:
@@ -173,7 +188,7 @@ def end_of_episode(agent):
     # add the last experience to the buffer in GainExperience object
     send_to_experience(agent, exit_game=True)
 
-    train(agent)
+    # train(agent)
 
     agent.eps *= agent.config["playing"]["eps_discount"]
 
@@ -244,11 +259,12 @@ def train(agent):
     targets = np.array(agent.experience.get_targets())
     print(f'Start training after round number: {agent.experience.rounds_count}')
     start = time.time()
-    agent.training_history = agent.model.fit(x=inputs,y=targets,epochs=30)
+    agent.training_history = agent.experience.model.fit(x=inputs,y=targets,validation_split=0.1,batch_size=16,epochs=10,verbose=1,callbacks=[agent.ckpt,agent.tb])
     end = time.time()
-    print(f'Finish training after round number: {agent.experience.rounds_count}, time lapsed: {end-start}')
+    print(f'Finish training after round number: {agent.experience.rounds_count}, time elapsed: {end-start}')
     is_save = True if agent.experience.rounds_count % 1000 == 0 else False
     if is_save:
         saved_model_path = os.path.join(agent.config['training']['models_folder'],
                  agent.config['training']['save_model'])
-        agent.model.save(saved_model_path)
+        agent.experience.model.save(saved_model_path)
+

@@ -12,6 +12,8 @@ from agent_code.dawas_tang.callbacks import send_to_experience,\
     compute_reward,formulate_state,train,GainExperience
 import sys
 
+from keras.callbacks import ModelCheckpoint,TensorBoard
+
 
 def look_for_targets(free_space, start, targets, logger=None):
     """Find direction of closest target that can be reached via free tiles.
@@ -102,6 +104,8 @@ def setup(self):
             # build model to be trained from scratch if no pre-trained weights specified
             self.model = build_model()
     self.experience = GainExperience(model=self.model,memory_size=1000,discount_rate=0.99)
+    self.ckpt = ModelCheckpoint('agent_code/dawas_tang/models/ckpt/simple_model_{epoch:02d}-{val_loss:.2f}.h5',save_best_only=True,period=1000)
+    self.tb = TensorBoard(log_dir='agent_code/dawas_tang/tensorboard_logs/simple',update_freq=10000)
 
 
 def act(self):
@@ -262,9 +266,7 @@ def end_of_episode(self):
 
     send_to_experience(self,exit_game=True)
 
-    if self.experience.rounds_count == s.n_rounds:
-        train(self,last_round=True)
-    else:
-        train(self)
+    train(self)
 
     self.eps *= self.config["playing"]["eps_discount"]
+

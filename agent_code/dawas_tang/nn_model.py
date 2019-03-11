@@ -32,4 +32,3 @@ class recordHistory(Callback):
 
     def on_epoch_end(self, logs=None):
         self.losses.append(logs.get('loss'))
-
