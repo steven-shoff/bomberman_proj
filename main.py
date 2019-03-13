@@ -44,7 +44,7 @@ def main():
             # ('my_agent', False),
             ('simple_agent', False),
             # ('simple_agent', True)
-            ('dawas_tang', False)
+            ('dawas_tang', True)
         ])
     # world = ReplayWorld('Replay 2019-03-08 11-12-16')
     user_inputs = []

@@ -1,9 +1,13 @@
 import numpy as np
+import matplotlib.pyplot as plt
+a = list()
 
-a = np.array([[1, 2], [3, 4]])
-b = np.array([[5, 6], [7, 8]])
-c = np.array([[9, 10], [11, 12]])
+# for i in range(1000):
+#     a.append(1.0 * 0.99**i)
+#
+# plt.plot(range(1000),a)
+# plt.show()
 
-res = np.stack((a,b,c),axis=2)
-print(res.shape)
-print(res)
+idx = list(range(100))
+np.random.shuffle(idx)
+print(idx)

@@ -4,7 +4,7 @@ rewards = {
     'MOVED_UP': 0.04,
     'MOVED_DOWN': 0.04,
 
-    'WAITED': -0.04,
+    'WAITED': -1,
     'INTERRUPTED': 0,
     'INVALID_ACTION': -5,
 

@@ -11,7 +11,7 @@ import os
 from keras.callbacks import ModelCheckpoint,TensorBoard
 
 class GainExperience(object):
-    def __init__(self, model, memory_size, discount_rate):
+    def __init__(self, train_model, target_model, memory_size, discount_rate):
         '''
 
         :param memory_size: amount of states to save at one time for training
@@ -22,11 +22,12 @@ class GainExperience(object):
 
         self.max_memory_size = memory_size
         self.discount_rate = discount_rate
-        self.model = model
+        self.train_model = train_model
+        self.target_model = target_model
         self.inputs = list()
         self.targets = list()
         self.current_state = None
-        self.experiences_count = -1
+        self.experiences_count = 0
         self.rounds_count = 0
         self.ckpt = ModelCheckpoint('agent_code/dawas_tang/models/ckpt/dawas_tang_model_{epoch:02d}-{val_loss:.2f}.h5',
                                      save_best_only=True, period=1000)
@@ -47,19 +48,29 @@ class GainExperience(object):
         self.experiences_count += 1
         self.calculate_targets(experience, exit_game=exit_game)
 
-        inputs = np.array(self.get_inputs()).reshape((-1, 289))
+        inputs = np.array(self.get_inputs())
         targets = np.array(self.get_targets())
 
+        if self.experiences_count == 1: return
+        idx = list(range(len(inputs)))
+        np.random.shuffle(idx)
+        limit = np.min([len(inputs),200])
+        idx = idx[:limit]
+        input_batch = inputs[idx]
+        target_batch = targets[idx]
+
         start = time.time()
-        self.training_history = self.model.fit(x=inputs, y=targets, validation_split=0.1, epochs=10,
-                                                            verbose=1, callbacks=[self.ckpt])
+        self.training_history = self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.1, epochs=10,
+                                                     verbose=1, callbacks=[self.ckpt])
+        if self.experiences_count % 1000 == 0:
+            self.target_model.set_weights(self.train_model.get_weights())
         end = time.time()
         if self.rounds_count % 100 == 0:
             print(f'Finish training after round number: {self.rounds_count}, time elapsed: {end-start}'
                   f'\nSaving model')
             saved_model_path = os.path.join(self.config['training']['models_folder'],
                                             self.config['training']['save_model'])
-            self.model.save(saved_model_path)
+            self.target_model.save(saved_model_path)
         if exit_game:
             print(f'Round # {self.rounds_count} finished\n')
 
@@ -70,7 +81,8 @@ class GainExperience(object):
         # print(np.array(next_state).reshape((17, 17)))
         target = [0]*len(s.actions)
         if not exit_game:
-            max_predict = np.max(self.predict(next_state)[0])
+            next_state = np.expand_dims(next_state,axis=0)
+            max_predict = np.max(self.target_model.predict(next_state)[0])
             target[action_selected] = rewards_earned + self.discount_rate * max_predict
         else:
             target[action_selected] = rewards_earned
@@ -84,7 +96,7 @@ class GainExperience(object):
 
 
     def predict(self,current_state):
-        prediction = self.model.predict(current_state)[0]
+        prediction = self.train_model.predict(current_state)[0]
         return prediction
 
     def get_inputs(self):
@@ -115,7 +127,14 @@ def setup(agent):
             try:
                 pretrained_model_path = os.path.join(agent.config['training']['models_folder'],
                                                      agent.config['training']['model_name'])
-                model = read_model(pretrained_model_path)
+                train_model = read_model(pretrained_model_path)
+
+                if agent.is_conv:
+                    target_model = build_conv()
+                else:
+                    target_model = build_model()
+
+                target_model.set_weights(train_model.get_weights())
             # read_model method raises exceptions to be caught here
             except FileNotFoundError:
                 agent.logger.info("No model is specified to load")
@@ -126,14 +145,18 @@ def setup(agent):
         else:
             # build model to be trained from scratch if no pre-trained weights specified
             if not agent.is_conv:
-                model = build_model()
+                train_model = build_model()
+                target_model = build_model()
+                target_model.set_weights(train_model.get_weights())
             else:
-                model = build_conv()
+                train_model = build_conv()
+                target_model = build_conv()
+                target_model.set_weights(train_model.get_weights())
 
         agent.eps = agent.config["playing"]["eps"]
 
         max_memory_size = agent.config['training']['max_memory_size']
-        experience = GainExperience(model=model, memory_size=max_memory_size, discount_rate=0.9)
+        experience = GainExperience(train_model=train_model, target_model = target_model, memory_size=max_memory_size, discount_rate=0.9)
         agent.experience = experience
     else:
         try:
@@ -196,9 +219,8 @@ def end_of_episode(agent):
     # add the last experience to the buffer in GainExperience object
     send_to_experience(agent, exit_game=True)
 
-    # train(agent)
-
-    agent.eps *= agent.config["playing"]["eps_discount"]
+    if agent.experience.experiences_count % 100 and agent.eps > 0.1:
+        agent.eps *= agent.config["playing"]["eps_discount"]
 
 
 def send_to_experience(agent, exit_game=False):
@@ -219,7 +241,8 @@ def send_to_experience(agent, exit_game=False):
 
     # create one experience and save it into GainExperience object
     new_experience = [last_action, reward, new_state]
-
+    if agent.experience.experiences_count == 2:
+        print()
     agent.experience.expand_experience(new_experience, exit_game=exit_game)
 
 
@@ -232,7 +255,7 @@ def formulate_state(state, is_conv):
     bombs = [(x,y) for (x,y,t) in state['bombs']]
     bombs_times = [t for (x,y,t) in state['bombs']]
     explosions = state['explosions']
-    coins = [coin for coin in state['coins']]
+    coins = state['coins']
     # Enriching the arena with info about own locations, bombs, explosions, opponent positions etc.
     # indicating the location of the player himself
 
@@ -263,6 +286,9 @@ def formulate_state(state, is_conv):
         bombs_layer = np.zeros((17, 17))
         explosions_layer = np.zeros((17, 17))
 
+        for coin in coins:
+            arena[coin] = 5
+
         for other in others:
             agents_layer[other] = 2
         agents_layer[self_xy] = 3
@@ -277,7 +303,6 @@ def formulate_state(state, is_conv):
         agents_layer = agents_layer.transpose().copy()
         bombs_layer = bombs_layer.transpose().copy()
         explosions_layer = explosions_layer.transpose().copy()
-
         new_state = np.stack((arena,agents_layer,bombs_layer,explosions_layer),axis=2)
         return new_state
 

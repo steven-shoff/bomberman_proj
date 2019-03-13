@@ -1,6 +1,8 @@
 from keras.models import Sequential,load_model
-from keras.layers import Dense,Conv2D
+from keras.layers import Dense,Conv2D,Flatten
 from keras.callbacks import Callback
+from keras.optimizers import RMSprop
+from keras.losses import logcosh
 
 from settings import s
 
@@ -30,7 +32,10 @@ def build_conv():
     model = Sequential()
     model.add(Conv2D(16, 8, 4, activation='relu', input_shape=(17,17,4), name='conv1'))
     model.add(Conv2D(32, 4, 2, activation='relu', name='conv2'))
+    model.add(Flatten())
     model.add(Dense(256, activation='relu', name='dense1'))
     model.add(Dense(num_actions, name='output'))
-    model.compile(optimizer='adam', loss='mse')
+    optimizer = RMSprop(decay=0.01)
+    model.compile(optimizer=optimizer, loss='logcosh')
     return model
+

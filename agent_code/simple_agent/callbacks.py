@@ -103,7 +103,7 @@ def setup(self):
         else:
             # build model to be trained from scratch if no pre-trained weights specified
             self.model = build_model()
-    self.experience = GainExperience(model=self.model,memory_size=1000,discount_rate=0.99)
+    self.experience = GainExperience(train_model=self.model, memory_size=1000, discount_rate=0.99)
     self.ckpt = ModelCheckpoint('agent_code/dawas_tang/models/ckpt/simple_model_{epoch:02d}-{val_loss:.2f}.h5',save_best_only=True,period=1000)
     self.tb = TensorBoard(log_dir='agent_code/dawas_tang/tensorboard_logs/simple',update_freq=10000)
 
