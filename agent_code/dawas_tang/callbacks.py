@@ -1,14 +1,13 @@
 import time
 import numpy as np
-from time import sleep
 from agent_code.dawas_tang.nn_model import *
 import json
 from settings import s
 from random import randint
-from .rewards_table import rewards
 import sys
 import os
 from keras.callbacks import ModelCheckpoint,TensorBoard
+from . import reward_fun
 
 class GainExperience(object):
     def __init__(self, train_model, target_model, memory_size, discount_rate):
@@ -237,12 +236,10 @@ def send_to_experience(agent, exit_game=False):
     events = agent.events
 
     # formulate reward
-    reward = compute_reward(agent)
+    reward = reward_fun.compute_reward(agent)
 
     # create one experience and save it into GainExperience object
     new_experience = [last_action, reward, new_state]
-    if agent.experience.experiences_count == 2:
-        print()
     agent.experience.expand_experience(new_experience, exit_game=exit_game)
 
 
@@ -306,26 +303,25 @@ def formulate_state(state, is_conv):
         new_state = np.stack((arena,agents_layer,bombs_layer,explosions_layer),axis=2)
         return new_state
 
-def compute_reward(agent):
-    total_reward = 0
-    events = agent.events
-    for event in events:
-        total_reward += list(rewards.values())[event]
-
-    return total_reward
-
-
-def train(agent):
-    inputs = np.array(agent.experience.get_inputs()).reshape((-1,289))
-    targets = np.array(agent.experience.get_targets())
-    print(f'Start training after round number: {agent.experience.rounds_count}')
-    start = time.time()
-    agent.training_history = agent.experience.model.fit(x=inputs,y=targets,validation_split=0.1,batch_size=16,epochs=10,verbose=1,callbacks=[agent.ckpt,agent.tb])
-    end = time.time()
-    print(f'Finish training after round number: {agent.experience.rounds_count}, time elapsed: {end-start}')
-    is_save = True if agent.experience.rounds_count % 1000 == 0 else False
-    if is_save:
-        saved_model_path = os.path.join(agent.config['training']['models_folder'],
-                 agent.config['training']['save_model'])
-        agent.experience.model.save(saved_model_path)
-
+# def compute_reward(agent):
+#     total_reward = 0
+#     events = agent.events
+#     for event in events:
+#         total_reward += list(rewards.values())[event]
+#
+#     return total_reward
+#
+#
+# def train(agent):
+#     inputs = np.array(agent.experience.get_inputs()).reshape((-1,289))
+#     targets = np.array(agent.experience.get_targets())
+#     print(f'Start training after round number: {agent.experience.rounds_count}')
+#     start = time.time()
+#     agent.training_history = agent.experience.model.fit(x=inputs,y=targets,validation_split=0.1,batch_size=16,epochs=10,verbose=1,callbacks=[agent.ckpt,agent.tb])
+#     end = time.time()
+#     print(f'Finish training after round number: {agent.experience.rounds_count}, time elapsed: {end-start}')
+#     is_save = True if agent.experience.rounds_count % 1000 == 0 else False
+#     if is_save:
+#         saved_model_path = os.path.join(agent.config['training']['models_folder'],
+#                  agent.config['training']['save_model'])
+#         agent.experience.model.save(saved_model_path)

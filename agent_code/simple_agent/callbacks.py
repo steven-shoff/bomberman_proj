@@ -9,7 +9,7 @@ import json
 import os
 from agent_code.dawas_tang.nn_model import build_model,read_model
 from agent_code.dawas_tang.callbacks import send_to_experience,\
-    compute_reward,formulate_state,train,GainExperience
+    formulate_state,GainExperience
 import sys
 
 from keras.callbacks import ModelCheckpoint,TensorBoard
@@ -265,8 +265,6 @@ def end_of_episode(self):
     self.logger.debug(f'Encountered {len(self.events)} game event(s) in final step')
 
     send_to_experience(self,exit_game=True)
-
-    train(self)
 
     self.eps *= self.config["playing"]["eps_discount"]
 
