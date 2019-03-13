@@ -169,6 +169,8 @@ def setup(agent):
         except Exception:
             agent.logger.info("An error occured in loading the model")
             sys.exit(-1)
+			
+		agent.mybomb = None
 
 
 
@@ -202,6 +204,9 @@ def act(agent):
             action_idx = np.argmax(prediction)
             print(f'{prediction}, {s.actions[action_idx]}')
             agent.next_action = s.actions[action_idx]
+			
+		if agent.next_action == 'BOMB':
+            agent.mybomb = (x, y)
 
     except Exception as e:
         print(f'Error occured with message: {str(e)}')
