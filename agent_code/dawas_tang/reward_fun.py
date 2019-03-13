@@ -1,0 +1,144 @@
+import numpy as np
+from .rewards_table import rewards
+from settings import s
+"""
+To calculate the reward, you need the following 2 functions
+"""
+
+def det_valid_action(state, other_loc=None):
+
+    valid_actions = s.actions.copy()
+    arena = np.absolute(state['arena'].copy())
+    bombs = state['bombs']
+    x, y, _, bombs_left, _ = state['self']
+    if other_loc is not None:
+        x, y = other_loc
+
+    others = [(xo, yo) for (xo, yo, _, _, _) in state['others']]
+    bombs_pos = [(xb, yb) for (xb, yb, tb) in bombs]
+
+    if arena[x, y-1] == 1 or (x, y-1) in bombs_pos or (x, y-1) in others:
+        valid_actions.remove('UP')
+    if arena[x, y+1] == 1 or (x, y+1) in bombs_pos or (x, y+1) in others:
+        valid_actions.remove('DOWN')
+    if arena[x-1, y] == 1 or (x-1, y) in bombs_pos or (x-1, y) in others:
+        valid_actions.remove('LEFT')
+    if arena[x+1, y] == 1 or (x+1, y) in bombs_pos or (x+1, y) in others:
+        valid_actions.remove('RIGHT')
+    if bombs_left == 0:
+        valid_actions.remove('BOMB')
+    if (x, y) in bombs_pos:
+        valid_actions.remove('WAIT')
+    return valid_actions
+
+
+def compute_reward(agent):
+
+    events = agent.events
+    state = agent.game_state.copy()
+    mybomb = agent.mybomb
+    last_action = agent.next_action
+
+    total_reward = 0
+    state = state.copy()
+    arena = state['arena'].copy()
+
+    # ADD REWARD ACCORDING TO EXISTED EVENTS
+    for event in events:
+        total_reward += list(rewards.values())[event]
+    (x, y, _, nb, _) = state['self']
+
+    # FUTURE EVENT ESTIMATED
+    coord_dict = {'UP': (0, -1), 'DOWN': (0, 1), 'LEFT': (-1, 0), 'RIGHT': (1, 0), 'BOMB': (0, 0), 'WAIT': (0, 0)}
+    old_coord = None
+    all_coord = []
+    # Predict future events:
+    # t + 1, t + 2, t + 3, t + 4 (4 time steps estimation)
+    # Use for calculating rewards of explosion and bomb implementation
+    for t0 in range(0, 5):
+        if t0 == 0:
+            next_coord = [(x, y)]
+        # Find all possible coordinates in future steps
+        else:
+            next_coord = []
+            for coord in old_coord:
+                next_coord += [np.add(coord, coord_dict[i]) for i in det_valid_action(state, other_loc=coord)]  # Possible coordinates in 2nd Step
+            if len(next_coord) != 0:
+                next_coord = [tuple(i) for i in np.unique(next_coord, axis=0)]
+        all_coord.append(next_coord)
+        old_coord = next_coord
+
+        # find bombs in the future time step
+        bombs_t = [(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if tb == t0]
+        deatharea = np.minimum(state['explosions'].copy(), 1)*3 - 2  # -2 or 1
+        bombarea = np.zeros(arena.shape)
+        for xb, yb, tb in bombs_t:
+
+            bfactor = 2
+
+            if (xb, yb) == mybomb:
+                bafactor = 5
+
+            deatharea[xb, yb] = 1
+            for c_down in range(1, 4):
+                if yb + c_down > 16 or state['arena'][xb, yb + c_down] == -1:
+                    break
+                deatharea[xb, yb + c_down] = 1
+                bombarea[xb, yb + c_down] = bfactor
+
+            for c_up in range(1, 4):
+                if yb - c_up < 0 or state['arena'][xb, yb - c_up] == -1:
+                    break
+                deatharea[yb - c_up, xb] = 1
+                bombarea[yb - c_up, xb] = bfactor
+            for c_right in range(1, 4):
+                if xb + c_right > 16 or state['arena'][xb + c_right, yb] == -1:
+                    break
+                deatharea[yb, xb + c_right] = 1
+                bombarea[yb, xb + c_right] = bfactor
+            for c_left in range(1, 4):
+                if xb - c_left < 0 or state['arena'][xb - c_left, yb] == -1:
+                    break
+                deatharea[xb - c_left, yb] = 1
+                bombarea[xb - c_left, yb] = bfactor
+
+        check_map = np.array([deatharea[pos] for pos in next_coord])
+        if np.equal(check_map, 1).all():
+            total_reward -= 10
+        elif nb == 0 and (mybomb[0], mybomb[1], 4) in bombs_t and t0 == 4:
+            crates_destroy = np.sum(np.equal(bombarea, state['arena'] + 5))  # Number of crates the placed bomb can destroy
+            if crates_destroy != 0:
+                total_reward += 5 + crates_destroy
+            else:
+                total_reward -= 2
+        elif np.sum(check_map) == len(check_map) - 1 and last_action == 'WAIT' and deatharea[(x, y)] == -2:
+            total_reward += 3 # good WAIT compensation
+
+        # Predict state in next step
+        bombarea = np.minimum(bombarea, 2)
+        state['arena'][np.equal(deatharea, arena)] = 0
+        state['explosions'] = np.maximum(state['explosions'] - 1, bombarea)
+
+    last_x, last_y = np.subtract((x, y), coord_dict[last_action])
+
+    # Other events: reward if the player is getting closer to the coin
+    # Even if the coin does not exist in previous state, getting closer means minimizing steps in collecting coins after destorying crates
+
+    if len(state['coins']) != 0:
+        last_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
+        this_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
+
+        if abs(last_closest_coin[0] - last_x) + abs(last_closest_coin[1] - last_y) <\
+                abs(this_closest_coin[0] - x) + abs(this_closest_coin[1] - y):
+            total_reward += 2
+
+    # WAITING and CYCLING Penalty
+    elif len(np.unique(agent.last_moves)) < 3 and len(agent.last_moves) >= 10:
+        total_reward -= 2
+
+    elif last_action == 'WAIT':
+        if (x, y) == mybomb:
+            total_reward -= 5
+        else:
+            total_reward -= 2
+    return total_reward
