@@ -168,9 +168,8 @@ def setup(agent):
         except Exception:
             agent.logger.info("An error occured in loading the model")
             sys.exit(-1)
-			
-	agent.mybomb = None
-	# For reward computation
+    agent.mybomb = None
+    # For reward computation
     agent.last_moves = []
 
 
@@ -183,18 +182,18 @@ def act(agent):
     try:
         state = agent.game_state
         current_state = formulate_state(state, agent.is_conv)
-
+        current_pos = self_xy = state['self'][0:2]
         if agent.config['workflow']['train']:
             agent.experience.current_state = current_state
             if state['step'] == 1:
                 agent.experience.rounds_count += 1
-				agent.last_moves = [(x, y)]
-			 elif len(agent.last_moves) >= 10:
-				del agent.last_moves[0]
-				agent.last_moves.append((x, y))
-			else:
-				agent.last_moves.append((x, y))
-			
+                agent.last_moves = [current_pos]
+            elif len(agent.last_moves) >= 10:
+                del agent.last_moves[0]
+                agent.last_moves.append(current_pos)
+            else:
+                agent.last_moves.append(current_pos)
+
             rnd = randint(1, 100)
             ths = int(agent.eps * 100)
             if rnd < ths:
@@ -212,9 +211,9 @@ def act(agent):
             action_idx = np.argmax(prediction)
             print(f'{prediction}, {s.actions[action_idx]}')
             agent.next_action = s.actions[action_idx]
-			
-		if agent.next_action == 'BOMB':
-            agent.mybomb = (x, y)
+
+        if agent.next_action == 'BOMB':
+            agent.mybomb = current_pos
 
     except Exception as e:
         print(f'Error occured with message: {str(e)}')
