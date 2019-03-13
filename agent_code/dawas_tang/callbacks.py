@@ -42,7 +42,7 @@ class GainExperience(object):
         # updating the experience and add the current_state to it
         experience.insert(0,self.current_state)
 
-        assert (not np.array_equal(experience[0], experience[1])),'old experience and new experience are exactly the same'
+        # assert (not np.array_equal(experience[0], experience[1])),'old experience and new experience are exactly the same'
         # Compute the target value for this state and add it directly into the training data buffers
         self.experiences_count += 1
         self.calculate_targets(experience, exit_game=exit_game)
@@ -61,11 +61,13 @@ class GainExperience(object):
                                             self.config['training']['save_model'])
             self.model.save(saved_model_path)
         if exit_game:
-            print(f'Round # {self.rounds_count} finished')
+            print(f'Round # {self.rounds_count} finished\n')
 
 
     def calculate_targets(self, experience, exit_game=False):
         current_state, action_selected, rewards_earned, next_state = experience
+        # print(np.array(current_state).reshape((17,17)))
+        # print(np.array(next_state).reshape((17, 17)))
         target = [0]*len(s.actions)
         if not exit_game:
             max_predict = np.max(self.predict(next_state)[0])
@@ -103,6 +105,7 @@ def setup(agent):
 
     # load the flag of using pretrained weights
     load_pretrained = agent.config["training"]["pretrained"]
+    agent.is_conv = agent.config["training"]["conv"]
 
     # if in training mode, we have two options: train from scratch or load weights
     if agent.config['workflow']['train']:
@@ -122,7 +125,16 @@ def setup(agent):
                 sys.exit(-1)
         else:
             # build model to be trained from scratch if no pre-trained weights specified
-            model = build_model()
+            if not agent.is_conv:
+                model = build_model()
+            else:
+                model = build_conv()
+
+        agent.eps = agent.config["playing"]["eps"]
+
+        max_memory_size = agent.config['training']['max_memory_size']
+        experience = GainExperience(model=model, memory_size=max_memory_size, discount_rate=0.9)
+        agent.experience = experience
     else:
         try:
             pretrained_model_path = os.path.join(agent.config['training']['models_folder'],
@@ -135,11 +147,6 @@ def setup(agent):
             agent.logger.info("An error occured in loading the model")
             sys.exit(-1)
 
-    agent.eps = agent.config["playing"]["eps"]
-
-    max_memory_size = agent.config['training']['max_memory_size']
-    experience = GainExperience(model=model,memory_size=max_memory_size,discount_rate=0.9)
-    agent.experience = experience
 
 
 def act(agent):
@@ -149,27 +156,28 @@ def act(agent):
 
     try:
         state = agent.game_state
-        if state['step'] == 1:
-            agent.experience.rounds_count += 1
-        current_state = formulate_state(state)
-        agent.logger.info(f'current state from act: {current_state}')
+        current_state = formulate_state(state, agent.is_conv)
 
         if agent.config['workflow']['train']:
             agent.experience.current_state = current_state
-
+            if state['step'] == 1:
+                agent.experience.rounds_count += 1
             rnd = randint(1, 100)
             ths = int(agent.eps * 100)
             if rnd < ths:
                 agent.logger.info('Selecting action at Random for exploring...')
-                agent.next_action = np.random.choice(['RIGHT', 'LEFT', 'UP', 'DOWN', 'BOMB','WAIT'])
+                choice = np.random.choice(['RIGHT', 'LEFT', 'UP', 'DOWN', 'BOMB','WAIT'])
+                print(f'Random choice: {choice}')
+                agent.next_action = choice
             else:
-                prediction = agent.experience.predict(current_state)[0]
+                prediction = agent.experience.predict(current_state)
                 action_idx = np.argmax(prediction)
+                print(f'prediction: {prediction}, {s.actions[action_idx]}')
                 agent.next_action = s.actions[action_idx]
         else:
             prediction = agent.model.predict(current_state)[0]
             action_idx = np.argmax(prediction)
-            print(action_idx)
+            print(f'{prediction}, {s.actions[action_idx]}')
             agent.next_action = s.actions[action_idx]
 
     except Exception as e:
@@ -201,13 +209,13 @@ def send_to_experience(agent, exit_game=False):
     state = agent.game_state
 
     # formulate state in the required shape
-    new_state = formulate_state(state)
+    new_state = formulate_state(state, agent.is_conv)
 
     # get events happened in the last step
     events = agent.events
 
     # formulate reward
-    reward = compute_reward(events)
+    reward = compute_reward(agent)
 
     # create one experience and save it into GainExperience object
     new_experience = [last_action, reward, new_state]
@@ -216,7 +224,7 @@ def send_to_experience(agent, exit_game=False):
 
 
 
-def formulate_state(state):
+def formulate_state(state, is_conv):
     # Extracting info about the game
     arena = state['arena'].copy()
     self_xy = state['self'][0:2]
@@ -227,27 +235,55 @@ def formulate_state(state):
     coins = [coin for coin in state['coins']]
     # Enriching the arena with info about own locations, bombs, explosions, opponent positions etc.
     # indicating the location of the player himself
-    arena[self_xy] = 3
 
-    # indicating the location of the remaining opponents
-    for opponent in others:
-        arena[opponent] = 2
+    if not is_conv:
+        if self_xy in bombs:
+            arena[self_xy] = 5
+        else:
+            arena[self_xy] = 3
 
-    for coin in coins:
-        arena[coin] = 4
+        # indicating the location of the remaining opponents
+        for opponent in others:
+            arena[opponent] = 2
 
-    for bomb_idx, bomb in enumerate(bombs):
-        arena[bomb] = (bombs_times[bomb_idx] + 1) * 10
+        for coin in coins:
+            arena[coin] = 4
 
-    explosions_locations = np.nonzero(explosions)
-    arena[explosions_locations] = explosions[explosions_locations] * 100
+        for bomb_idx, bomb in enumerate(bombs):
+            if bomb != self_xy:
+                arena[bomb] = (bombs_times[bomb_idx] + 1) * 10
 
-    return arena.T.flatten().reshape((-1,289))
+        explosions_locations = np.nonzero(explosions)
+        arena[explosions_locations] = explosions[explosions_locations] * 100
 
+        return arena.T.flatten().reshape((-1,289))
+    else:
+        #layer_1 is the arena
+        agents_layer = np.zeros((17,17))
+        bombs_layer = np.zeros((17, 17))
+        explosions_layer = np.zeros((17, 17))
 
-def compute_reward(events):
+        for other in others:
+            agents_layer[other] = 2
+        agents_layer[self_xy] = 3
+
+        for bomb_idx, bomb in enumerate(bombs):
+            bombs_layer[bomb] = 4
+
+        explosions_locations = np.nonzero(explosions)
+        explosions_layer[explosions_locations] = explosions[explosions_locations] * 100
+
+        arena = arena.transpose().copy()
+        agents_layer = agents_layer.transpose().copy()
+        bombs_layer = bombs_layer.transpose().copy()
+        explosions_layer = explosions_layer.transpose().copy()
+
+        new_state = np.stack((arena,agents_layer,bombs_layer,explosions_layer),axis=2)
+        return new_state
+
+def compute_reward(agent):
     total_reward = 0
-
+    events = agent.events
     for event in events:
         total_reward += list(rewards.values())[event]
 

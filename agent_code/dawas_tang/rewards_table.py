@@ -1,14 +1,14 @@
 rewards = {
-    'MOVED_LEFT': -1,
-    'MOVED_RIGHT': -1,
-    'MOVED_UP': -1,
-    'MOVED_DOWN': -1,
+    'MOVED_LEFT': 0.04,
+    'MOVED_RIGHT': 0.04,
+    'MOVED_UP': 0.04,
+    'MOVED_DOWN': 0.04,
 
-    'WAITED': -1,
+    'WAITED': -0.04,
     'INTERRUPTED': 0,
-    'INVALID_ACTION': -2,
+    'INVALID_ACTION': -5,
 
-    'BOMB_DROPPED': -1,
+    'BOMB_DROPPED': 0,
     'BOMB_EXPLODED': 0,
 
     'CRATE_DESTROYED': 30,

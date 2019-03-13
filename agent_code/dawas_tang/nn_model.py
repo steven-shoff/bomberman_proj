@@ -1,5 +1,5 @@
 from keras.models import Sequential,load_model
-from keras.layers import Dense
+from keras.layers import Dense,Conv2D
 from keras.callbacks import Callback
 
 from settings import s
@@ -26,9 +26,11 @@ def read_model(model_name):
     model = load_model(model_name)
     return model
 
-class recordHistory(Callback):
-    def on_train_begin(self, logs={}):
-        self.losses = []
-
-    def on_epoch_end(self, logs=None):
-        self.losses.append(logs.get('loss'))
+def build_conv():
+    model = Sequential()
+    model.add(Conv2D(16, 8, 4, activation='relu', input_shape=(17,17,4), name='conv1'))
+    model.add(Conv2D(32, 4, 2, activation='relu', name='conv2'))
+    model.add(Dense(256, activation='relu', name='dense1'))
+    model.add(Dense(num_actions, name='output'))
+    model.compile(optimizer='adam', loss='mse')
+    return model

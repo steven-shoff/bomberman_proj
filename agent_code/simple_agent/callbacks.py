@@ -7,7 +7,7 @@ from collections import deque
 from settings import s
 import json
 import os
-from agent_code.dawas_tang.nn_model import  *
+from agent_code.dawas_tang.nn_model import build_model,read_model
 from agent_code.dawas_tang.callbacks import send_to_experience,\
     compute_reward,formulate_state,train,GainExperience
 import sys
