@@ -26,7 +26,8 @@ class GainExperience(object):
         self.inputs = list()
         self.targets = list()
         self.current_state = None
-        self.experiences_count = 0
+        self.experiences_count = None
+        self.experiences = list()
         self.rounds_count = 0
         self.ckpt = ModelCheckpoint('agent_code/dawas_tang/models/ckpt/dawas_tang_model_{epoch:02d}-{val_loss:.2f}.h5',
                                      save_best_only=True, period=1000)
@@ -36,32 +37,44 @@ class GainExperience(object):
             config = json.load(f)
 
         self.config = config
+        self.reset_interval = config["training"]["reset_interval"]
 
-    def expand_experience(self, experience, exit_game=False):
+    def expand_experience(self, experience):
         # Recieved experience is: [action_selected, reward_earned, next_state]
         # updating the experience and add the current_state to it
         experience.insert(0,self.current_state)
 
-        # assert (not np.array_equal(experience[0], experience[1])),'old experience and new experience are exactly the same'
-        # Compute the target value for this state and add it directly into the training data buffers
-        self.experiences_count += 1
-        self.calculate_targets(experience, exit_game=exit_game)
+        self.experiences.append(experience)
 
-        inputs = np.array(self.get_inputs())
-        targets = np.array(self.get_targets())
+        # Compute the target value for this state and add it directly into the training data buffers
+        self.experiences_count = len(self.experiences)
+
+        if self.experiences_count > 1000:
+            del self.experiences[0]
 
         if self.experiences_count == 1: return
-        idx = list(range(len(inputs)))
-        np.random.shuffle(idx)
-        limit = np.min([len(inputs),200])
-        idx = idx[:limit]
-        input_batch = inputs[idx]
-        target_batch = targets[idx]
 
+        idx = list(range(self.experiences_count))
+        np.random.shuffle(idx)
+        limit = np.min([self.experiences_count,300])
+        idx = idx[:limit]
+        input_batch = list()
+        target_batch = list()
+        for i in idx:
+            exp = self.experiences[i]
+            input_batch.append(exp[0])
+            action = exp[1]
+            reward = exp[2]
+            next_state = exp[3]
+            is_terminal = exp[4]
+            target_batch.append(self.calculate_targets(action,reward,next_state,is_terminal))
+
+        input_batch = np.array(input_batch)
+        target_batch = np.array(target_batch)
         start = time.time()
-        self.training_history = self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.1, epochs=10,
+        self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.1, epochs=10,
                                                      verbose=1, callbacks=[self.ckpt])
-        if self.experiences_count % 1000 == 0:
+        if self.experiences_count % self.reset_interval == 0:
             self.target_model.set_weights(self.train_model.get_weights())
         end = time.time()
         if self.rounds_count % 100 == 0:
@@ -70,27 +83,20 @@ class GainExperience(object):
             saved_model_path = os.path.join(self.config['training']['models_folder'],
                                             self.config['training']['save_model'])
             self.target_model.save(saved_model_path)
-        if exit_game:
+        if experience[-1]:
             print(f'Round # {self.rounds_count} finished\n')
 
 
-    def calculate_targets(self, experience, exit_game=False):
-        current_state, action_selected, rewards_earned, next_state = experience
-        # print(np.array(current_state).reshape((17,17)))
-        # print(np.array(next_state).reshape((17, 17)))
+    def calculate_targets(self, action, reward, next_state, is_terminal=False):
+
         target = [0]*len(s.actions)
-        if not exit_game:
+        if not is_terminal:
             next_state = np.expand_dims(next_state,axis=0)
             max_predict = np.max(self.target_model.predict(next_state)[0])
-            target[action_selected] = rewards_earned + self.discount_rate * max_predict
+            target[action] = reward + self.discount_rate * max_predict
         else:
-            target[action_selected] = rewards_earned
-        self.targets.append(target)
-        self.inputs.append(current_state)
-
-        if len(self.inputs) > self.max_memory_size:
-            del self.inputs[0]
-            del self.targets[0]
+            target[action] = reward
+        return target
 
 
 
@@ -202,11 +208,13 @@ def act(agent):
                 print(f'Random choice: {choice}')
                 agent.next_action = choice
             else:
+                current_state = np.expand_dims(current_state,axis=0)
                 prediction = agent.experience.predict(current_state)
                 action_idx = np.argmax(prediction)
                 print(f'prediction: {prediction}, {s.actions[action_idx]}')
                 agent.next_action = s.actions[action_idx]
         else:
+            current_state = np.expand_dims(current_state, axis=0)
             prediction = agent.model.predict(current_state)[0]
             action_idx = np.argmax(prediction)
             print(f'{prediction}, {s.actions[action_idx]}')
@@ -222,7 +230,8 @@ def act(agent):
 def reward_update(agent):
 
     send_to_experience(agent)
-
+    if agent.experience.experiences_count % 100 == 0 and agent.eps > 0.1:
+        agent.eps *= agent.config["playing"]["eps_discount"]
 
 
 def end_of_episode(agent):
@@ -230,9 +239,6 @@ def end_of_episode(agent):
     # Get the last state of the game after the last step
     # add the last experience to the buffer in GainExperience object
     send_to_experience(agent, exit_game=True)
-
-    if agent.experience.experiences_count % 100 and agent.eps > 0.1:
-        agent.eps *= agent.config["playing"]["eps_discount"]
 
 
 def send_to_experience(agent, exit_game=False):
@@ -252,8 +258,8 @@ def send_to_experience(agent, exit_game=False):
     reward = reward_fun.compute_reward(agent)
 
     # create one experience and save it into GainExperience object
-    new_experience = [last_action, reward, new_state]
-    agent.experience.expand_experience(new_experience, exit_game=exit_game)
+    new_experience = [last_action, reward, new_state, exit_game]
+    agent.experience.expand_experience(new_experience)
 
 
 

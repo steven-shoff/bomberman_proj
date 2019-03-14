@@ -2,11 +2,12 @@
   "training":{
     "models_folder":"agent_code/dawas_tang/models",
     "model_name":"",
-    "save_model":"third_model.h5",
+    "save_model":"first_conv_model.h5",
     "weights_path":"",
     "pretrained":0,
     "max_memory_size": 1100,
-    "conv": 1
+    "conv": 1,
+    "reset_interval": 1000
   },
   "playing":{
     "eps":1.0,

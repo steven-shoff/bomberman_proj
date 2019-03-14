@@ -7,7 +7,7 @@ from collections import deque
 from settings import s
 import json
 import os
-from agent_code.dawas_tang.nn_model import build_model,read_model
+from agent_code.dawas_tang.nn_model import build_model,read_model,build_conv
 from agent_code.dawas_tang.callbacks import send_to_experience,\
     formulate_state,GainExperience
 import sys
@@ -85,14 +85,23 @@ def setup(self):
     with open('agent_code/dawas_tang/config.json') as f:
         self.config = json.load(f)
 
-    if self.config['workflow']['simple_train']:
-        if self.config["training"]["pretrained"]:
-            # read the path of the model to be loaded
+    load_pretrained = self.config["training"]["pretrained"]
+    self.is_conv = self.config["training"]["conv"]
 
-            self.pretrained_model_path = os.path.join(self.config['training']['models_folder'],
-                                                       self.config['training']['model_name'])
+    if self.config['workflow']['simple_train']:
+        if load_pretrained:
+            # read the path of the model to be loaded
             try:
-                self.model = read_model(self.pretrained_model_path)
+                self.pretrained_model_path = os.path.join(self.config['training']['models_folder'],
+                                                          self.config['training']['model_name'])
+                train_model = read_model(self.pretrained_model_path)
+
+                if self.is_conv:
+                    target_model = build_conv()
+                else:
+                    target_model = build_model()
+
+                target_model.set_weights(train_model.get_weights())
             # read_model method raises exceptions to be caught here
             except FileNotFoundError:
                 self.logger.info("No model is specified to load")
@@ -102,11 +111,22 @@ def setup(self):
                 sys.exit(-1)
         else:
             # build model to be trained from scratch if no pre-trained weights specified
-            self.model = build_model()
-    self.experience = GainExperience(train_model=self.model, memory_size=1000, discount_rate=0.99)
-    self.ckpt = ModelCheckpoint('agent_code/dawas_tang/models/ckpt/simple_model_{epoch:02d}-{val_loss:.2f}.h5',save_best_only=True,period=1000)
-    self.tb = TensorBoard(log_dir='agent_code/dawas_tang/tensorboard_logs/simple',update_freq=10000)
+            if not self.is_conv:
+                train_model = build_model()
+                target_model = build_model()
+                target_model.set_weights(train_model.get_weights())
+            else:
+                train_model = build_conv()
+                target_model = build_conv()
+                target_model.set_weights(train_model.get_weights())
 
+        max_memory_size = self.config['training']['max_memory_size']
+        experience = GainExperience(train_model=train_model, target_model=target_model, memory_size=max_memory_size,
+                                    discount_rate=0.9)
+        self.experience = experience
+    self.mybomb = None
+    # For reward computation
+    self.last_moves = []
 
 def act(self):
     """Called each game step to determine the agent's next action.
@@ -240,6 +260,14 @@ def act(self):
     # Keep track of chosen action for cycle detection
     if self.next_action == 'BOMB':
         self.bomb_history.append((x,y))
+        self.mybomb = (x, y)
+
+    if self.game_state['step'] == 1:
+        self.last_moves = [(x, y)]
+    else:
+        self.last_moves.append((x, y))
+        if len(self.last_moves) > 10:
+            del self.last_moves[0]
 
 
 def reward_update(self):
@@ -265,6 +293,4 @@ def end_of_episode(self):
     self.logger.debug(f'Encountered {len(self.events)} game event(s) in final step')
 
     send_to_experience(self,exit_game=True)
-
-    self.eps *= self.config["playing"]["eps_discount"]
 
