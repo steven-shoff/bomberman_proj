@@ -27,6 +27,7 @@ class GainExperience(object):
         self.targets = list()
         self.current_state = None
         self.experiences_count = None
+        self.num_steps = 0
         self.experiences = list()
         self.rounds_count = 0
         self.eps = None
@@ -43,6 +44,8 @@ class GainExperience(object):
     def expand_experience(self, experience):
         # Recieved experience is: [action_selected, reward_earned, next_state]
         # updating the experience and add the current_state to it
+
+        self.num_steps += 1
         experience.insert(0,self.current_state)
 
         self.experiences.append(experience)
@@ -52,8 +55,6 @@ class GainExperience(object):
 
         if self.experiences_count > self.max_memory_size:
             del self.experiences[0]
-
-        if self.experiences_count == 1: return
 
         idx = list(range(self.experiences_count))
         np.random.shuffle(idx)
@@ -75,9 +76,9 @@ class GainExperience(object):
         input_batch = np.array(input_batch)
         target_batch = np.array(target_batch)
         start = time.time()
-        self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.1, epochs=10,
+        self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.0, epochs=10,
                                                      verbose=1, callbacks=[self.ckpt])
-        if self.experiences_count % self.reset_interval == 0:
+        if self.num_steps % self.reset_interval == 0:
             self.target_model.set_weights(self.train_model.get_weights())
         end = time.time()
         if self.rounds_count % 100 == 0:
@@ -87,7 +88,7 @@ class GainExperience(object):
                   f'\nSaving model')
             saved_model_path = os.path.join(self.config['training']['models_folder'],
                                             self.config['training']['save_model'])
-            self.target_model.save(saved_model_path)
+            self.train_model.save(saved_model_path)
 
         if experience[-1]:
             print(f'Round # {self.rounds_count} finished\n')
@@ -194,7 +195,7 @@ def act(agent):
     try:
         state = agent.game_state
         current_state = formulate_state(state, agent.is_conv)
-        current_pos = self_xy = state['self'][0:2]
+        current_pos = state['self'][0:2]
         if agent.config['workflow']['train']:
             agent.experience.current_state = current_state
             if state['step'] == 1:
@@ -244,7 +245,7 @@ def act(agent):
 def reward_update(agent):
 
     send_to_experience(agent)
-    if agent.experience.experiences_count % 50 == 0 and agent.experience.eps > 0.1:
+    if agent.experience.num_steps % 50 == 0 and agent.experience.eps > 0.1:
         agent.experience.eps *= agent.config["playing"]["eps_discount"]
 
 
