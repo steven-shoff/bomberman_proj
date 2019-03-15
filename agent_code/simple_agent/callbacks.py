@@ -145,7 +145,7 @@ def act(self):
 
     if self.config['workflow']['simple_train']:
         state = self.game_state
-        current_state = formulate_state(state)
+        current_state = formulate_state(state, self.is_conv)
         self.experience.current_state = current_state
 
     # Gather information about the game state
