@@ -42,7 +42,7 @@ class GainExperience(object):
         self.reset_interval = config["training"]["reset_interval"]
 
     def expand_experience(self, experience):
-        # Recieved experience is: [action_selected, reward_earned, next_state]
+        # Recieved experience is: [action_selected, reward_earned, next_state, exit_game]
         # updating the experience and add the current_state to it
 
         self.num_steps += 1
@@ -58,11 +58,10 @@ class GainExperience(object):
 
         idx = list(range(self.experiences_count))
         np.random.shuffle(idx)
-        limit = np.min([self.experiences_count,400])
+        limit = np.min([len(idx),400])
         idx = idx[:limit]
         input_batch = list()
         target_batch = list()
-
 
         for i in idx:
             exp = self.experiences[i]
@@ -76,8 +75,7 @@ class GainExperience(object):
         input_batch = np.array(input_batch)
         target_batch = np.array(target_batch)
         start = time.time()
-        self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.0, epochs=10,
-                                                     verbose=1, callbacks=[self.ckpt])
+        self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.0, epochs=10, verbose=1)
         if self.num_steps % self.reset_interval == 0:
             self.target_model.set_weights(self.train_model.get_weights())
         end = time.time()
@@ -221,13 +219,21 @@ def act(agent):
                 print(f'prediction: {prediction}, {s.actions[action_idx]}')
                 agent.next_action = s.actions[action_idx]
         else:
+            if len(agent.last_moves) >= 10:
+                del agent.last_moves[0]
+                agent.last_moves.append(current_pos)
+            else:
+                agent.last_moves.append(current_pos)
+            last_four = agent.last_moves[-4:]
+            force_to_move = True if last_four[0] == last_four[2] and last_four[1] == last_four[3] else False
             current_state = np.expand_dims(current_state, axis=0)
             prediction = agent.model.predict(current_state)[0]
             valid_actions = reward_fun.det_valid_action(agent.game_state)
             # action_idx = np.argmax(prediction)
             sorted_pred = prediction.argsort()[::-1]
             for pred in sorted_pred:
-                if s.actions[pred] not in valid_actions:
+                if s.actions[pred] not in valid_actions or force_to_move:
+                    force_to_move = False
                     continue
                 else:
                     action_name = s.actions[pred]
@@ -247,6 +253,7 @@ def reward_update(agent):
     send_to_experience(agent)
     if agent.experience.num_steps % 50 == 0 and agent.experience.eps > 0.1:
         agent.experience.eps *= agent.config["playing"]["eps_discount"]
+        if agent.experience.eps < 0.1: agent.experience.eps = 0.1
 
 
 def end_of_episode(agent):
