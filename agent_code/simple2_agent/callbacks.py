@@ -1,10 +1,10 @@
-
+import sys
+import json
+import time
 import numpy as np
 from random import shuffle
-from time import time, sleep
 from collections import deque
-
-from settings import s
+from agent_code.local_agent.callbacks import setup as set2up, act as act2, reward_update as reward2update, end_of_episode as end2episode
 
 
 def look_for_targets(free_space, start, targets, logger=None):
@@ -73,6 +73,7 @@ def setup(self):
     self.coordinate_history = deque([], 20)
     # While this timer is positive, agent will not hunt/attack opponents
     self.ignore_others_timer = 0
+    set2up(self)
 
 
 def act(self):
@@ -89,7 +90,7 @@ def act(self):
     of self.next_action will be used. The default value is 'WAIT'.
     """
     self.logger.info('Picking action according to rule set')
-
+    act2(self)
     # Gather information about the game state
     arena = self.game_state['arena']
     x, y, _, bombs_left, score = self.game_state['self']
@@ -99,7 +100,7 @@ def act(self):
     coins = self.game_state['coins']
     bomb_map = np.ones(arena.shape) * 5
     for xb,yb,t in bombs:
-        for (i,j) in [(xb+h, yb) for h in range(-3,4)] + [(xb, yb+h) for h in range(-3,4)]:
+        for (i,j) in [(xb+h, yb) for h in range(-3, 4)] + [(xb, yb+h) for h in range(-3, 4)]:
             if (0 < i < bomb_map.shape[0]) and (0 < j < bomb_map.shape[1]):
                 bomb_map[i,j] = min(bomb_map[i,j], t)
 
@@ -202,6 +203,12 @@ def act(self):
     # Keep track of chosen action for cycle detection
     if self.next_action == 'BOMB':
         self.bomb_history.append((x,y))
+    state = self.game_state
+    (x, y, _, _, _) = state['self']
+
+    if self.next_action == 'BOMB':
+        self.mybomb = (x, y)
+
 
 
 def reward_update(self):
@@ -214,7 +221,7 @@ def reward_update(self):
     contrast to act, this method has no time limit.
     """
     self.logger.debug(f'Encountered {len(self.events)} game event(s)')
-
+    reward2update(self)
 
 def end_of_episode(self):
     """Called at the end of each game to hand out final rewards and do training.
@@ -224,3 +231,5 @@ def end_of_episode(self):
     final step. You should place your actual learning code in this method.
     """
     self.logger.debug(f'Encountered {len(self.events)} game event(s) in final step')
+
+    end2episode(self)

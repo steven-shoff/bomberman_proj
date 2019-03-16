@@ -144,7 +144,7 @@ def compute_reward(agent):
         q1map = np.sum(crates_arena[:y, :])
         q2map = np.sum(crates_arena[y + 1:, :])
         q3map = np.sum(crates_arena[:, :x])
-        q4map = np.sum(crates_arena[x + 1:, ])
+        q4map = np.sum(crates_arena[:, :x + 1:])
 
         if np.argmax([q1map, q2map, q3map, q4map]) == s.actions.index(last_action):
             total_reward += 2
