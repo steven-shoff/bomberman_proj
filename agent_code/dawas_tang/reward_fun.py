@@ -89,8 +89,8 @@ def compute_reward(agent):
             for c_up in range(1, 4):
                 if yb - c_up < 0 or state['arena'][xb, yb - c_up] == -1:
                     break
-                deatharea[yb - c_up, xb] = 1
-                bombarea[yb - c_up, xb] = bfactor
+                deatharea[xb, yb - c_up] = 1
+                bombarea[xb, yb - c_up] = bfactor
             for c_right in range(1, 4):
                 if xb + c_right > 16 or state['arena'][xb + c_right, yb] == -1:
                     break
@@ -155,5 +155,4 @@ def compute_reward(agent):
             total_reward -= 5
     if last_action == 'WAIT':
         total_reward -= 2
-
     return total_reward

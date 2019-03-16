@@ -52,8 +52,7 @@ class GainExperience(object):
 
         # Compute the target value for this state and add it directly into the training data buffers
         self.experiences_count = len(self.experiences)
-
-        if self.experiences_count > self.max_memory_size:
+        if len(self.experiences) > self.max_memory_size:
             del self.experiences[0]
 
         idx = list(range(self.experiences_count))
@@ -243,7 +242,6 @@ def act(agent):
 
 
 def reward_update(agent):
-
     send_to_experience(agent)
     if agent.experience.num_steps % 50 == 0 and agent.experience.eps > 0.1:
         agent.experience.eps *= agent.config["playing"]["eps_discount"]
