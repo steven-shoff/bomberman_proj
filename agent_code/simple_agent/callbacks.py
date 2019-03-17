@@ -265,6 +265,7 @@ def act(self):
     if self.game_state['step'] == 1:
         self.last_moves = [(x, y)]
         self.experience.rounds_count += 1
+        self.experience.num_steps = 0
 
     else:
         self.last_moves.append((x, y))

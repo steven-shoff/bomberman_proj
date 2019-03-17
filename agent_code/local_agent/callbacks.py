@@ -204,8 +204,7 @@ def act(agent):
 
         if agent.config['workflow']['train']:
             agent.experience.current_state = current_state
-            if state['step'] == 1:
-                agent.eps = agent.config["model_config"]["eps"]
+
             rnd = randint(1, 100)
             ths = int(agent.eps * 100)
             if rnd < ths:
@@ -217,7 +216,7 @@ def act(agent):
                 prediction = agent.model.predict(current_state)[0]
                 action_idx = np.argmax(prediction)
                 agent.next_action = s.actions[action_idx]
-                print(prediction)
+                # print(prediction)
         else:
             prediction = agent.model.predict(current_state)[0]
             action_idx = np.argmax(prediction)
@@ -325,7 +324,7 @@ def formulate_state(state):
         diglist.append(5)
     else:
         closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
-        best_orientation = np.argmin([abs(closest_coin[0] - mx) + abs(closest_coin[1] - my) for (mx, my) in
+        best_orientation = np.argmin([(closest_coin[0] - mx)**2 + (closest_coin[1] - my)**2 for (mx, my) in
                                       [(x, y-1), (x, y+1), (x-1, y), (x+1, y)]]) + 1
         diglist.append(best_orientation)
 
@@ -489,20 +488,31 @@ def compute_reward(agent):
 
     crates_arena = np.maximum(arena, 0)
     crates_arena = crates_arena.T
+    all_bombs_loc = [(xb, yb) for (xb, yb, _) in all_bombs]
 
-    if len(state['coins']) != 0:
-        last_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
+    # Coin Environment
+    if len(state['coins']) != 0 and 11 not in events:
+        sorted_coins = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))
+        last_closest_coin = sorted_coins[0]
 
-        if abs(last_closest_coin[0] - last_x) + abs(last_closest_coin[1] - last_y) > \
-                abs(last_closest_coin[0] - x) + abs(last_closest_coin[1] - y) and 6 not in events:
+        if (last_closest_coin[0] - last_x)**2 + (last_closest_coin[1] - last_y)**2 > \
+                (last_closest_coin[0] - x)**2 + (last_closest_coin[1] - y)**2 and 6 not in events:
             total_reward += 3
         elif 6 not in events and last_action != 'WAIT':
             arrowcoord = [(last_x, last_y-1), (last_x, last_y+1), (last_x-1, last_y), (last_x+1, last_y)]
-            minarrowcoord = sorted(arrowcoord, key=lambda k: abs(last_closest_coin[0] - k[0]) + abs(last_closest_coin[1] - k[1]))[0]
+            possible_coord = [(xc, yc) for (xc, yc) in arrowcoord if arena[xc, yc] != -1 and (xc, yc) not in state['others'] and (xc, yc) not in all_bombs_loc]
 
-            if arena[minarrowcoord] == -1 and (minarrowcoord[0] - x)**2 + (minarrowcoord[1] - y)**2 < 4:
+            if len(sorted_coins) > 1:
+                second_closest_coin = sorted_coins[1]
+            else:
+                second_closest_coin = last_closest_coin
+            minarrowcoord = sorted(possible_coord, key=lambda k: ((last_closest_coin[0] - k[0])**2 + (last_closest_coin[1] - k[1])**2)*1 + ((second_closest_coin[0] - k[0])**2 + (second_closest_coin[1] - k[1])**2)*0.01)[0]
+
+            if (x, y) == minarrowcoord:
                 total_reward += 3
-
+            else:
+                total_reward -= 3
+    # Opponent Environment
     elif len(state['others']) != 0 and np.sum(crates_arena) == 0 and 6 not in events:
         last_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
         this_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]

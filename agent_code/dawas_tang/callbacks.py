@@ -42,8 +42,6 @@ class GainExperience(object):
         self.reset_interval = config["training"]["reset_interval"]
 
     def expand_experience(self, experience):
-        print(self.experiences_count)
-        print(self.rounds_count)
         # Recieved experience is: [action_selected, reward_earned, next_state]
         # updating the experience and add the current_state to it
 
@@ -77,12 +75,13 @@ class GainExperience(object):
         input_batch = np.array(input_batch)
         target_batch = np.array(target_batch)
         start = time.time()
-        self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.0, epochs=10,
-                                                     verbose=1, callbacks=[self.ckpt])
+        #self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.0, epochs=10,
+        #                                             verbose=1, callbacks=[self.ckpt])
+        self.train_model.train_on_batch(x=input_batch, y=target_batch)
         if self.num_steps % self.reset_interval == 0:
             self.target_model.set_weights(self.train_model.get_weights())
         end = time.time()
-        if self.rounds_count % 100 == 0:
+        if self.rounds_count % 2 == 0 and self.num_steps == 1:
             with open('eps.txt','w') as f:
                 f.write(str(self.eps))
             print(f'Finish training after round number: {self.rounds_count}, time elapsed: {end-start}'
@@ -201,6 +200,7 @@ def act(agent):
             agent.experience.current_state = current_state
             if state['step'] == 1:
                 agent.experience.rounds_count += 1
+                agent.experience.num_steps = 0
                 agent.last_moves = [current_pos]
             elif len(agent.last_moves) >= 10:
                 del agent.last_moves[0]
@@ -253,6 +253,7 @@ def end_of_episode(agent):
 
     # Get the last state of the game after the last step
     # add the last experience to the buffer in GainExperience object
+    agent.experience.num_steps = 0
     send_to_experience(agent, exit_game=True)
 
 
