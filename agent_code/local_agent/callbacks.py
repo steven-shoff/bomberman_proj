@@ -217,7 +217,7 @@ def act(agent):
                 prediction = agent.model.predict(current_state)[0]
                 action_idx = np.argmax(prediction)
                 agent.next_action = s.actions[action_idx]
-                #print(prediction)
+                print(prediction)
         else:
             prediction = agent.model.predict(current_state)[0]
             action_idx = np.argmax(prediction)
@@ -295,7 +295,7 @@ def send_to_experience(agent, exit_game=False):
     # formulate reward
     agent.total_reward = compute_reward(agent)
 
-    #print('ACTION: {}, REWARD: {}'.format(agent.next_action, agent.total_reward))
+    print('LOC; {}, ACTION: {}, REWARD: {}'.format((agent.game_state['self'][0:2]), agent.next_action, agent.total_reward))
     # create one experience and save it into GainExperience object
     new_experience = [last_action, agent.total_reward, new_state]
 
@@ -478,7 +478,7 @@ def compute_reward(agent):
             if crates_destroy != 0:
                 total_reward += 2 + crates_destroy
             else:
-                total_reward -= 2
+                total_reward -= 5
         elif np.sum(check_map) == len(check_map) - 1 and last_action == 'WAIT' and deatharea[(x, y)] == -2:
             total_reward += 6  # good WAIT compensation
 
@@ -492,21 +492,26 @@ def compute_reward(agent):
 
     if len(state['coins']) != 0:
         last_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
-        this_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
 
-        if abs(last_closest_coin[0] - last_x) + abs(last_closest_coin[1] - last_y) < \
-                abs(this_closest_coin[0] - x) + abs(this_closest_coin[1] - y):
-            total_reward += 2
+        if abs(last_closest_coin[0] - last_x) + abs(last_closest_coin[1] - last_y) > \
+                abs(last_closest_coin[0] - x) + abs(last_closest_coin[1] - y) and 6 not in events:
+            total_reward += 3
+        elif 6 not in events and last_action != 'WAIT':
+            arrowcoord = [(last_x, last_y-1), (last_x, last_y+1), (last_x-1, last_y), (last_x+1, last_y)]
+            minarrowcoord = sorted(arrowcoord, key=lambda k: abs(last_closest_coin[0] - k[0]) + abs(last_closest_coin[1] - k[1]))[0]
 
-    elif len(state['others']) != 0 and np.sum(crates_arena) == 0:
+            if arena[minarrowcoord] == -1 and (minarrowcoord[0] - x)**2 + (minarrowcoord[1] - y)**2 < 4:
+                total_reward += 3
+
+    elif len(state['others']) != 0 and np.sum(crates_arena) == 0 and 6 not in events:
         last_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
         this_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
 
-        if abs(last_closest_p[0] - last_x) + abs(last_closest_p[1] - last_y) < \
+        if abs(last_closest_p[0] - last_x) + abs(last_closest_p[1] - last_y) > \
                 abs(this_closest_p[0] - x) + abs(this_closest_p[1] - y):
             total_reward += 2
 
-    elif np.sum(crates_arena) != 0 and len(all_bombs) == 0:
+    elif np.sum(crates_arena) != 0 and len(all_bombs) == 0 and 6 not in events:
         q1map = np.sum(crates_arena[:y, :])
         q2map = np.sum(crates_arena[y + 1:, :])
         q3map = np.sum(crates_arena[:, :x])
@@ -517,8 +522,9 @@ def compute_reward(agent):
     # print('check: {}, total reward: {}'.format('here', total_reward))
     if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
 
-        if len(agent.last_moves) >= 3 and (x, y) == agent.last_moves[-2]:
-            total_reward -= 5
+        if len(agent.last_moves) >= 3 and (x, y) != agent.last_moves[-2]:
+            total_reward += 2
+
     if last_action == 'WAIT':
         total_reward -= 5
 
@@ -533,7 +539,7 @@ def train(agent, train_tick=0, exit_game=False):
     end = time.time()
     # print('Finish training after round number: {}, step number: {}, time elapsed: {}'.format(agent.experience.rounds_count, agent.game_state['step'], end-start))
 
-    is_save = True if agent.experience.rounds_count % 500 == 0 or agent.experience.rounds_count == s.n_rounds else False
+    is_save = True if agent.experience.rounds_count % 50 == 0 or agent.experience.rounds_count == s.n_rounds else False
     if is_save and exit_game:
         print('ROUND COUNT: {}'.format(agent.experience.rounds_count))
         newname = agent.config['training']['save_model'] + str(int(agent.olddig) + train_tick) + '_model.h5'

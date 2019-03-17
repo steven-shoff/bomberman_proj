@@ -264,6 +264,8 @@ def act(self):
 
     if self.game_state['step'] == 1:
         self.last_moves = [(x, y)]
+        self.experience.rounds_count += 1
+
     else:
         self.last_moves.append((x, y))
         if len(self.last_moves) > 10:

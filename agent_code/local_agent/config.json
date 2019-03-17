@@ -7,18 +7,18 @@
   },
   "playing": {
     "models_folder": "agent_code/local_agent/models",
-    "model_name": "sacrates075_4000_model.h5",
-    "scores_folder": "agent_code/toad_agent/scores",
+    "model_name": "ppcrates075_1400_model.h5",
+    "scores_folder": "agent_code/local_agent/scores",
     "scores_name": "nnmodel_0score.txt"
   },
   "model_config":{
-    "eps":0.1,
-    "gamma": 0.1,
+    "eps":0.9,
+    "gamma": 0.05,
     "eps_discount":0.95
   },
   "workflow":{
     "train":1,
-    "pretrained":0
+    "pretrained":1
   }
 }
 

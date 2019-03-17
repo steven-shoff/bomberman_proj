@@ -42,6 +42,8 @@ class GainExperience(object):
         self.reset_interval = config["training"]["reset_interval"]
 
     def expand_experience(self, experience):
+        print(self.experiences_count)
+        print(self.rounds_count)
         # Recieved experience is: [action_selected, reward_earned, next_state]
         # updating the experience and add the current_state to it
 

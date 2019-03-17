@@ -1,8 +1,8 @@
 rewards = {
-    'MOVED_LEFT': 0.5,
-    'MOVED_RIGHT': 0.5,
-    'MOVED_UP': 0.5,
-    'MOVED_DOWN': 0.5,
+    'MOVED_LEFT': -0.5,
+    'MOVED_RIGHT': -0.5,
+    'MOVED_UP': -0.5,
+    'MOVED_DOWN': -0.5,
 
     'WAITED': -1,
     'INTERRUPTED': 0,
