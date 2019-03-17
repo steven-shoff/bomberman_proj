@@ -8,6 +8,7 @@ import sys
 import os
 from keras.callbacks import ModelCheckpoint,TensorBoard
 from . import reward_fun
+from .rewards_table import rewards
 
 class GainExperience(object):
     def __init__(self, train_model, target_model, memory_size, discount_rate):
@@ -31,9 +32,6 @@ class GainExperience(object):
         self.experiences = list()
         self.rounds_count = 0
         self.eps = None
-        self.ckpt = ModelCheckpoint('agent_code/dawas_tang/models/ckpt/dawas_tang_model_{epoch:02d}-{val_loss:.2f}.h5',
-                                     save_best_only=True, period=1000)
-        # self.tb = TensorBoard(log_dir='agent_code/dawas_tang/tensorboard_logs/dawas_tang',update_freq=10000)
 
         with open('agent_code/dawas_tang/config.json') as f:
             config = json.load(f)
@@ -277,7 +275,7 @@ def send_to_experience(agent, exit_game=False):
     events = agent.events
 
     # formulate reward
-    reward = reward_fun.compute_reward(agent)
+    reward = compute_reward(agent)
 
     # create one experience and save it into GainExperience object
     new_experience = [last_action, reward, new_state, exit_game]
@@ -344,13 +342,13 @@ def formulate_state(state, is_conv):
         new_state = np.stack((arena,agents_layer,bombs_layer,explosions_layer),axis=2)
         return new_state
 
-# def compute_reward(agent):
-#     total_reward = 0
-#     events = agent.events
-#     for event in events:
-#         total_reward += list(rewards.values())[event]
-#
-#     return total_reward
+def compute_reward(agent):
+    total_reward = 0
+    events = agent.events
+    for event in events:
+        total_reward += list(rewards.values())[event]
+
+    return total_reward
 #
 #
 # def train(agent):

@@ -1,20 +1,20 @@
 {
   "training":{
-    "models_folder":"agent_code/dawas_tang/models/ckpt",
-    "model_name":"second_conv_model_coins.h5",
-    "save_model":"second_conv_model_coins.h5",
+    "models_folder":"agent_code/dawas_tang/models",
+    "model_name":"",
+    "save_model":"first_conv_model_coins.h5",
     "weights_path":"",
-    "pretrained":1,
+    "pretrained":0,
     "max_memory_size": 5000,
     "conv": 1,
     "reset_interval": 1000
   },
   "playing":{
-    "eps":0.20027702685748935,
+    "eps":1.0,
     "eps_discount":0.99
   },
   "workflow":{
-    "train":0,
+    "train":1,
     "simple_train":0
   }
 }

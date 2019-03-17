@@ -1,19 +1,19 @@
 rewards = {
-    'MOVED_LEFT': 0.04,
-    'MOVED_RIGHT': 0.04,
-    'MOVED_UP': 0.04,
-    'MOVED_DOWN': 0.04,
+    'MOVED_LEFT': -1,
+    'MOVED_RIGHT': -1,
+    'MOVED_UP': -1,
+    'MOVED_DOWN': -1,
 
     'WAITED': -1,
     'INTERRUPTED': 0,
-    'INVALID_ACTION': -5,
+    'INVALID_ACTION': -2,
 
     'BOMB_DROPPED': 0,
     'BOMB_EXPLODED': 0,
 
     'CRATE_DESTROYED': 30,
     'COIN_FOUND': 0,
-    'COIN_COLLECTED':60,
+    'COIN_COLLECTED':30,
 
     'KILLED_OPPONENT': 100,
     'KILLED_SELF': 0,

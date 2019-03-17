@@ -89,8 +89,8 @@ def compute_reward(agent):
             for c_up in range(1, 4):
                 if yb - c_up < 0 or state['arena'][xb, yb - c_up] == -1:
                     break
-                deatharea[yb - c_up, xb] = 1
-                bombarea[yb - c_up, xb] = bfactor
+                deatharea[xb, yb - c_up] = 1
+                bombarea[xb, yb - c_up] = bfactor
             for c_right in range(1, 4):
                 if xb + c_right > 16 or state['arena'][xb + c_right, yb] == -1:
                     break
@@ -110,11 +110,11 @@ def compute_reward(agent):
         elif nb == 0 and (mybomb[0], mybomb[1], 4) in bombs_t and t0 == 4:
             crates_destroy = np.sum(np.equal(bombarea, state['arena']+4))  # Number of crates the placed bomb can destroy
             if crates_destroy != 0:
-                total_reward += 5 + crates_destroy
+                total_reward += 2 + crates_destroy
             else:
-                total_reward -= 2
+                total_reward -= 5
         elif np.sum(check_map) == len(check_map) - 1 and last_action == 'WAIT' and deatharea[(x, y)] == -2:
-            total_reward += 4  # good WAIT compensation
+            total_reward += 6  # good WAIT compensation
 
         # Predict state in next step
         bombarea = np.minimum(bombarea, 2)
@@ -126,34 +126,40 @@ def compute_reward(agent):
 
     if len(state['coins']) != 0:
         last_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
-        this_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
 
-        if abs(last_closest_coin[0] - last_x) + abs(last_closest_coin[1] - last_y) < \
-                abs(this_closest_coin[0] - x) + abs(this_closest_coin[1] - y):
-            total_reward += 2
+        if abs(last_closest_coin[0] - last_x) + abs(last_closest_coin[1] - last_y) > \
+                abs(last_closest_coin[0] - x) + abs(last_closest_coin[1] - y) and 6 not in events:
+            total_reward += 3
+        elif 6 not in events and last_action != 'WAIT':
+            arrowcoord = [(last_x, last_y-1), (last_x, last_y+1), (last_x-1, last_y), (last_x+1, last_y)]
+            minarrowcoord = sorted(arrowcoord, key=lambda k: abs(last_closest_coin[0] - k[0]) + abs(last_closest_coin[1] - k[1]))[0]
 
-    elif len(state['others']) != 0 and np.sum(crates_arena) == 0:
+            if arena[minarrowcoord] == -1 and (minarrowcoord[0] - x)**2 + (minarrowcoord[1] - y)**2 < 4:
+                total_reward += 3
+
+    elif len(state['others']) != 0 and np.sum(crates_arena) == 0 and 6 not in events:
         last_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
         this_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
 
-        if abs(last_closest_p[0] - last_x) + abs(last_closest_p[1] - last_y) < \
+        if abs(last_closest_p[0] - last_x) + abs(last_closest_p[1] - last_y) > \
                 abs(this_closest_p[0] - x) + abs(this_closest_p[1] - y):
             total_reward += 2
 
-    elif np.sum(crates_arena) != 0 and len(all_bombs) == 0:
+    elif np.sum(crates_arena) != 0 and len(all_bombs) == 0 and 6 not in events:
         q1map = np.sum(crates_arena[:y, :])
         q2map = np.sum(crates_arena[y + 1:, :])
         q3map = np.sum(crates_arena[:, :x])
-        q4map = np.sum(crates_arena[x + 1:, ])
+        q4map = np.sum(crates_arena[:, x + 1:])
 
         if np.argmax([q1map, q2map, q3map, q4map]) == s.actions.index(last_action):
             total_reward += 2
     # print('check: {}, total reward: {}'.format('here', total_reward))
     if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
 
-        if len(agent.last_moves) >= 3 and (x, y) == agent.last_moves[-2]:
-            total_reward -= 5
+        if len(agent.last_moves) >= 3 and (x, y) != agent.last_moves[-2]:
+            total_reward += 1
+
     if last_action == 'WAIT':
-        total_reward -= 2
+        total_reward -= 5
 
     return total_reward
