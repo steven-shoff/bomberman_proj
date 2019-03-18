@@ -1,10 +1,10 @@
 {
   "training":{
     "models_folder":"agent_code/dawas_tang/models/ckpt",
-    "model_name":"dawas_tang_model_10-0.63.h5",
+    "model_name":"first_conv_model_coins.h5",
     "save_model":"first_conv_model_coins.h5",
     "weights_path":"",
-    "pretrained":0,
+    "pretrained":1,
     "max_memory_size": 5000,
     "conv": 1,
     "reset_interval": 1000
@@ -14,7 +14,7 @@
     "eps_discount":0.99
   },
   "workflow":{
-    "train":1,
-    "simple_train":1
+    "train":0,
+    "simple_train":0
   }
 }

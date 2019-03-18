@@ -115,7 +115,7 @@ def setup(agent):
 
     agent.experience = ExperienceCache(model=agent.model)
     agent.mybomb = None
-    eps = agent.config["playing"]["eps"]
+    eps = agent.config["model_config"]["eps"]
     agent.eps = eps
     agent.total_reward = 0
     agent.timetick = None
@@ -271,7 +271,7 @@ def formulate_state(state):
         diglist.append('5')
     else:
         closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
-        best_orientation = np.argmin([abs(closest_coin[0] - mx) + abs(closest_coin[1] - my) for (mx, my) in
+        best_orientation = np.argmin([(closest_coin[0] - mx)**2 + (closest_coin[1] - my)**2 for (mx, my) in
                                       [(x, y-1), (x, y+1), (x-1, y), (x+1, y)]]) + 1
         diglist.append(str(best_orientation))
 
@@ -279,13 +279,15 @@ def formulate_state(state):
         diglist.append('9')
     else:
         bombs_nearby = [(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -x) + abs(yb-y) <= tb + 4]
-        if len(state[bombs_nearby]) == 0:
+        if len(bombs_nearby) == 0:
             diglist.append('9')
         else:
             nearest_bomb = sorted(bombs_nearby, key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
             bomb_orientation = np.argmin([abs(nearest_bomb[0] - mx) + abs(nearest_bomb[1] - my) for (mx, my) in
                                           [(x, y-1), (x-1, y-1), (x-1, y), (x-1, y+1), (x, y+1), (x+1, y+1), (x+1, y), (x+1, y+1)]]) + 1
             diglist.append(str(bomb_orientation))
+
+    diglist.append(str(bombs_left))
 
     crates_arena = np.maximum(arena, 0)
     crates_arena = crates_arena.T
@@ -341,7 +343,7 @@ def compute_reward(agent):
     (x, y, _, nb, _) = state['self']
 
     coord_dict = {'UP': (0, -1), 'DOWN': (0, 1), 'LEFT': (-1, 0), 'RIGHT': (1, 0), 'BOMB': (0, 0), 'WAIT': (0, 0)}
-    last_x, last_y = np.subtract((x, y), coord_dict[last_action])
+    last_x, last_y = np.subtract((x, y), coord_dict[last_action]) if 6 not in events else (x, y)
     old_coord = None
     all_coord = []
     # Predict future events:
@@ -402,11 +404,11 @@ def compute_reward(agent):
         elif nb == 0 and (mybomb[0], mybomb[1], 4) in bombs_t and t0 == 4:
             crates_destroy = np.sum(np.equal(bombarea, state['arena']+4))  # Number of crates the placed bomb can destroy
             if crates_destroy != 0:
-                total_reward += 5 + crates_destroy
+                total_reward += 2 + crates_destroy
             else:
-                total_reward -= 2
+                total_reward -= 5
         elif np.sum(check_map) == len(check_map) - 1 and last_action == 'WAIT' and deatharea[(x, y)] == -2:
-            total_reward += 4  # good WAIT compensation
+            total_reward += 6  # good WAIT compensation
 
         # Predict state in next step
         bombarea = np.minimum(bombarea, 2)
@@ -415,24 +417,34 @@ def compute_reward(agent):
 
     crates_arena = np.maximum(arena, 0)
     crates_arena = crates_arena.T
+    all_bombs_loc = [(xb, yb) for (xb, yb, _) in all_bombs]
 
-    if len(state['coins']) != 0:
-        last_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
-        this_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
+    # Coin Environment
+    if len(state['coins']) != 0 and 11 not in events:
 
-        if abs(last_closest_coin[0] - last_x) + abs(last_closest_coin[1] - last_y) < \
-                abs(this_closest_coin[0] - x) + abs(this_closest_coin[1] - y):
-            total_reward += 2
+        arrowcoord = [(last_x, last_y - 1), (last_x, last_y + 1), (last_x - 1, last_y), (last_x + 1, last_y)]
+        possible_coord = [(xc, yc) for (xc, yc) in arrowcoord if arena[xc, yc] != -1 and (xc, yc) not in state['others'] and (xc, yc) not in all_bombs_loc]
+        sorted_coins = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))
+        check_coin = [sorted_coins[0], sorted_coins[0]] if len(sorted_coins) == 1 else [sorted_coins[0], sorted_coins[1]]
+        minarrowcoord = sorted(possible_coord, key=lambda k: ((check_coin[0][0] - k[0]) ** 2 + (
+                    check_coin[0][1] - k[1]) ** 2) * 1 + ((check_coin[1][0] - k[0]) ** 2 + (
+                    check_coin[1][1] - k[1]) ** 2) * 0.001)[0]
 
-    elif len(state['others']) != 0 and np.sum(crates_arena) == 0:
+        if (x, y) == minarrowcoord:
+            total_reward += 3
+        else:
+            total_reward -= 3
+
+    # Opponent Environment
+    elif len(state['others']) != 0 and np.sum(crates_arena) == 0 and 6 not in events:
         last_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
         this_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
 
-        if abs(last_closest_p[0] - last_x) + abs(last_closest_p[1] - last_y) < \
+        if abs(last_closest_p[0] - last_x) + abs(last_closest_p[1] - last_y) > \
                 abs(this_closest_p[0] - x) + abs(this_closest_p[1] - y):
             total_reward += 2
 
-    elif np.sum(crates_arena) != 0 and len(all_bombs) == 0:
+    elif np.sum(crates_arena) != 0 and len(all_bombs) == 0 and 6 not in events:
         q1map = np.sum(crates_arena[:y, :])
         q2map = np.sum(crates_arena[y + 1:, :])
         q3map = np.sum(crates_arena[:, :x])
@@ -441,12 +453,13 @@ def compute_reward(agent):
         if np.argmax([q1map, q2map, q3map, q4map]) == s.actions.index(last_action):
             total_reward += 2
     # print('check: {}, total reward: {}'.format('here', total_reward))
-    if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
+    # if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
 
-        if len(agent.last_moves) >= 3 and (x, y) == agent.last_moves[-2]:
-            total_reward -= 5
+        #if len(agent.last_moves) >= 3 and (x, y) == agent.last_moves[-2]:
+        #    total_reward += 2
+
     if last_action == 'WAIT':
-        total_reward -= 2
+        total_reward -= 5
 
     return total_reward
 

@@ -8,6 +8,7 @@ import sys
 import os
 from keras.callbacks import ModelCheckpoint,TensorBoard
 from . import reward_fun
+from .rewards_table import rewards
 
 class GainExperience(object):
     def __init__(self, train_model, target_model, memory_size, discount_rate):
@@ -31,9 +32,6 @@ class GainExperience(object):
         self.experiences = list()
         self.rounds_count = 0
         self.eps = None
-        self.ckpt = ModelCheckpoint('agent_code/dawas_tang/models/ckpt/dawas_tang_model_{epoch:02d}-{val_loss:.2f}.h5',
-                                     save_best_only=True, period=1000)
-        # self.tb = TensorBoard(log_dir='agent_code/dawas_tang/tensorboard_logs/dawas_tang',update_freq=10000)
 
         with open('agent_code/dawas_tang/config.json') as f:
             config = json.load(f)
@@ -42,7 +40,7 @@ class GainExperience(object):
         self.reset_interval = config["training"]["reset_interval"]
 
     def expand_experience(self, experience):
-        # Recieved experience is: [action_selected, reward_earned, next_state]
+        # Recieved experience is: [action_selected, reward_earned, next_state, exit_game]
         # updating the experience and add the current_state to it
 
         self.num_steps += 1
@@ -52,16 +50,16 @@ class GainExperience(object):
 
         # Compute the target value for this state and add it directly into the training data buffers
         self.experiences_count = len(self.experiences)
-        if len(self.experiences) > self.max_memory_size:
+
+        if self.experiences_count > self.max_memory_size:
             del self.experiences[0]
 
         idx = list(range(self.experiences_count))
         np.random.shuffle(idx)
-        limit = np.min([self.experiences_count,400])
+        limit = np.min([len(idx),400])
         idx = idx[:limit]
         input_batch = list()
         target_batch = list()
-
 
         for i in idx:
             exp = self.experiences[i]
@@ -75,13 +73,11 @@ class GainExperience(object):
         input_batch = np.array(input_batch)
         target_batch = np.array(target_batch)
         start = time.time()
-        #self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.0, epochs=10,
-        #                                             verbose=1, callbacks=[self.ckpt])
-        self.train_model.train_on_batch(x=input_batch, y=target_batch)
+        self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.0, epochs=10, verbose=1)
         if self.num_steps % self.reset_interval == 0:
             self.target_model.set_weights(self.train_model.get_weights())
         end = time.time()
-        if self.rounds_count % 2 == 0 and self.num_steps == 1:
+        if self.rounds_count % 2 == 0:
             with open('eps.txt','w') as f:
                 f.write(str(self.eps))
             print(f'Finish training after round number: {self.rounds_count}, time elapsed: {end-start}'
@@ -200,7 +196,6 @@ def act(agent):
             agent.experience.current_state = current_state
             if state['step'] == 1:
                 agent.experience.rounds_count += 1
-                agent.experience.num_steps = 0
                 agent.last_moves = [current_pos]
             elif len(agent.last_moves) >= 10:
                 del agent.last_moves[0]
@@ -222,13 +217,21 @@ def act(agent):
                 print(f'prediction: {prediction}, {s.actions[action_idx]}')
                 agent.next_action = s.actions[action_idx]
         else:
+            if len(agent.last_moves) >= 10:
+                del agent.last_moves[0]
+                agent.last_moves.append(current_pos)
+            else:
+                agent.last_moves.append(current_pos)
+            last_four = agent.last_moves[-4:]
+            force_to_move = True if last_four[0] == last_four[2] and last_four[1] == last_four[3] else False
             current_state = np.expand_dims(current_state, axis=0)
             prediction = agent.model.predict(current_state)[0]
             valid_actions = reward_fun.det_valid_action(agent.game_state)
             # action_idx = np.argmax(prediction)
             sorted_pred = prediction.argsort()[::-1]
             for pred in sorted_pred:
-                if s.actions[pred] not in valid_actions:
+                if s.actions[pred] not in valid_actions or force_to_move:
+                    force_to_move = False
                     continue
                 else:
                     action_name = s.actions[pred]
@@ -244,16 +247,17 @@ def act(agent):
 
 
 def reward_update(agent):
+
     send_to_experience(agent)
     if agent.experience.num_steps % 50 == 0 and agent.experience.eps > 0.1:
         agent.experience.eps *= agent.config["playing"]["eps_discount"]
+        if agent.experience.eps < 0.1: agent.experience.eps = 0.1
 
 
 def end_of_episode(agent):
 
     # Get the last state of the game after the last step
     # add the last experience to the buffer in GainExperience object
-    agent.experience.num_steps = 0
     send_to_experience(agent, exit_game=True)
 
 
@@ -271,7 +275,7 @@ def send_to_experience(agent, exit_game=False):
     events = agent.events
 
     # formulate reward
-    reward = reward_fun.compute_reward(agent)
+    reward = compute_reward(agent)
 
     # create one experience and save it into GainExperience object
     new_experience = [last_action, reward, new_state, exit_game]
@@ -338,13 +342,13 @@ def formulate_state(state, is_conv):
         new_state = np.stack((arena,agents_layer,bombs_layer,explosions_layer),axis=2)
         return new_state
 
-# def compute_reward(agent):
-#     total_reward = 0
-#     events = agent.events
-#     for event in events:
-#         total_reward += list(rewards.values())[event]
-#
-#     return total_reward
+def compute_reward(agent):
+    total_reward = 0
+    events = agent.events
+    for event in events:
+        total_reward += list(rewards.values())[event]
+
+    return total_reward
 #
 #
 # def train(agent):

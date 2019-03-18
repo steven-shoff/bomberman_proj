@@ -10,9 +10,9 @@ num_actions = len(s.actions)
 
 def build_model():
     model = Sequential()
-    model.add(Dense(44*4, activation='relu',input_shape=(44,), name='input'))
-    model.add(Dense(44*2, activation='relu',name='hidden_1'))
-    model.add(Dense(44, activation='relu',name='hidden_2'))
+    model.add(Dense(45*2, activation='relu',input_shape=(45,), name='input'))
+    model.add(Dense(45*1, activation='relu',name='hidden_1'))
+    model.add(Dense(20, activation='relu',name='hidden_2'))
     model.add(Dense(num_actions,name='output'))
     model.compile(optimizer='adam',loss=pure_se)
     return model

@@ -1,0 +1,27 @@
+{
+  "training":{
+    "models_folder":"agent_code/full_agent/models",
+    "model_name":"ppcrates0_",
+    "save_model":"ppcrates0_",
+    "weights_path":""
+  },
+  "playing": {
+    "models_folder": "agent_code/full_agent/models",
+    "model_name": "ppcrates075_1400_model.h5",
+    "scores_folder": "agent_code/full_agent/scores",
+    "scores_name": "nnmodel_0score.txt"
+  },
+  "model_config":{
+    "eps":0,
+    "gamma": 0.05,
+    "eps_discount":0.99,
+    "update_freq": 50,
+    "save_freq": 25
+  },
+  "workflow":{
+    "train":1,
+    "pretrained":1
+  }
+}
+
+

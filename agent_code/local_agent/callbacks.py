@@ -87,16 +87,16 @@ class GainExperience(object):
 
         selected_target = []
         for _s, a, r, s_, t in zip(selected_oldstate, selected_actions, selected_rewards, selected_newstate, selected_terminal):
-            _s = _s.reshape((1, 44))
+            _s = _s.reshape((1, 45))
             target = eval_net.predict(_s)[0]
-            s_ = s_.reshape((1, 44))
+            s_ = s_.reshape((1, 45))
             if not t:
                 max_predict = np.max(self.target_net.predict(s_)[0])
                 target[a] = r + self.discount_rate * max_predict
             else:
                 target[a] = r
             selected_target.append(target)
-        return selected_oldstate.reshape((-1, 44)), np.array(selected_target)
+        return selected_oldstate.reshape((-1, 45)), np.array(selected_target)
 
 
 def setup(agent):
@@ -165,7 +165,7 @@ def setup(agent):
     # experience = GainExperience(model=agent.model,memory_size=s.max_steps,discount_rate=0.99)
     target_net = keras.models.clone_model(agent.model)
     target_net.set_weights(agent.model.get_weights())
-    experience = GainExperience(model=target_net, memory_size=32768, batch_size=128, discount_rate=agent.config["model_config"]["gamma"])
+    experience = GainExperience(model=target_net, memory_size=32768, batch_size=512, discount_rate=agent.config["model_config"]["gamma"])
 
     agent.experience = experience
     agent.mybomb = None
@@ -210,13 +210,13 @@ def act(agent):
             if rnd < ths:
                 agent.logger.info('Selecting action at Random for exploring...')
 
-                valid_actions = det_valid_action(state)
-                agent.next_action = np.random.choice(valid_actions)
+                #valid_actions = det_valid_action(state)
+                agent.next_action = np.random.choice(s.actions[0:-2])
             else:
                 prediction = agent.model.predict(current_state)[0]
                 action_idx = np.argmax(prediction)
                 agent.next_action = s.actions[action_idx]
-                # print(prediction)
+                print(prediction)
         else:
             prediction = agent.model.predict(current_state)[0]
             action_idx = np.argmax(prediction)
@@ -273,7 +273,7 @@ def end_of_episode(agent):
     # add the last experience to the buffer in GainExperience object
     send_to_experience(agent, exit_game=True)
 
-    if agent.experience.rounds_count % 128 == 0:
+    if agent.experience.rounds_count % 50 == 0:
         agent.eps *= agent.config["model_config"]["eps_discount"]
         agent.experience.target_net.set_weights(agent.model.get_weights())
 
@@ -345,6 +345,7 @@ def formulate_state(state):
                                       [(x, y-1), (x, y+1), (x-1, y), (x+1, y)]]) + 1
         diglist.append(closest_orientation)
 
+    diglist.append(bombs_left)
     for (i, j) in [( 0, -4), (-1, -3), ( 0, -3), ( 1, -3),
                    (-2, -2), (-1, -2), ( 0, -2), ( 1, -2), ( 2, -2),
                    (-3, -1), (-2, -1), (-1, -1), ( 0, -1), ( 1, -1),
@@ -394,7 +395,7 @@ def formulate_state(state):
             diglist.append(arena[x + i, y + j] + 1)  # 0, 1, 2
 
     state = np.array(diglist)
-    return state.reshape((1, 44))
+    return state.reshape((1, 45))
 
 
 def compute_reward(agent):
@@ -414,7 +415,7 @@ def compute_reward(agent):
     (x, y, _, nb, _) = state['self']
 
     coord_dict = {'UP': (0, -1), 'DOWN': (0, 1), 'LEFT': (-1, 0), 'RIGHT': (1, 0), 'BOMB': (0, 0), 'WAIT': (0, 0)}
-    last_x, last_y = np.subtract((x, y), coord_dict[last_action])
+    last_x, last_y = np.subtract((x, y), coord_dict[last_action]) if 6 not in events else (x, y)
     old_coord = None
     all_coord = []
     # Predict future events:
@@ -492,26 +493,20 @@ def compute_reward(agent):
 
     # Coin Environment
     if len(state['coins']) != 0 and 11 not in events:
+
+        arrowcoord = [(last_x, last_y - 1), (last_x, last_y + 1), (last_x - 1, last_y), (last_x + 1, last_y)]
+        possible_coord = [(xc, yc) for (xc, yc) in arrowcoord if arena[xc, yc] != -1 and (xc, yc) not in state['others'] and (xc, yc) not in all_bombs_loc]
         sorted_coins = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))
-        last_closest_coin = sorted_coins[0]
+        check_coin = [sorted_coins[0], sorted_coins[0]] if len(sorted_coins) == 1 else [sorted_coins[0], sorted_coins[1]]
+        minarrowcoord = sorted(possible_coord, key=lambda k: ((check_coin[0][0] - k[0]) ** 2 + (
+                    check_coin[0][1] - k[1]) ** 2) * 1 + ((check_coin[1][0] - k[0]) ** 2 + (
+                    check_coin[1][1] - k[1]) ** 2) * 0.001)[0]
 
-        if (last_closest_coin[0] - last_x)**2 + (last_closest_coin[1] - last_y)**2 > \
-                (last_closest_coin[0] - x)**2 + (last_closest_coin[1] - y)**2 and 6 not in events:
+        if (x, y) == minarrowcoord:
             total_reward += 3
-        elif 6 not in events and last_action != 'WAIT':
-            arrowcoord = [(last_x, last_y-1), (last_x, last_y+1), (last_x-1, last_y), (last_x+1, last_y)]
-            possible_coord = [(xc, yc) for (xc, yc) in arrowcoord if arena[xc, yc] != -1 and (xc, yc) not in state['others'] and (xc, yc) not in all_bombs_loc]
+        else:
+            total_reward -= 3
 
-            if len(sorted_coins) > 1:
-                second_closest_coin = sorted_coins[1]
-            else:
-                second_closest_coin = last_closest_coin
-            minarrowcoord = sorted(possible_coord, key=lambda k: ((last_closest_coin[0] - k[0])**2 + (last_closest_coin[1] - k[1])**2)*1 + ((second_closest_coin[0] - k[0])**2 + (second_closest_coin[1] - k[1])**2)*0.01)[0]
-
-            if (x, y) == minarrowcoord:
-                total_reward += 3
-            else:
-                total_reward -= 3
     # Opponent Environment
     elif len(state['others']) != 0 and np.sum(crates_arena) == 0 and 6 not in events:
         last_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
@@ -530,10 +525,10 @@ def compute_reward(agent):
         if np.argmax([q1map, q2map, q3map, q4map]) == s.actions.index(last_action):
             total_reward += 2
     # print('check: {}, total reward: {}'.format('here', total_reward))
-    if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
+    # if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
 
-        if len(agent.last_moves) >= 3 and (x, y) != agent.last_moves[-2]:
-            total_reward += 2
+        #if len(agent.last_moves) >= 3 and (x, y) == agent.last_moves[-2]:
+        #    total_reward += 2
 
     if last_action == 'WAIT':
         total_reward -= 5
@@ -551,7 +546,8 @@ def train(agent, train_tick=0, exit_game=False):
 
     is_save = True if agent.experience.rounds_count % 50 == 0 or agent.experience.rounds_count == s.n_rounds else False
     if is_save and exit_game:
-        print('ROUND COUNT: {}'.format(agent.experience.rounds_count))
+        print('Finish training after round number: {}, step number: {}, time elapsed: {}'.format(agent.experience.rounds_count, agent.game_state['step'], end-start))
+        print('last eps: {}'.format(agent.eps))
         newname = agent.config['training']['save_model'] + str(int(agent.olddig) + train_tick) + '_model.h5'
         saved_model_path = os.path.join(agent.config['training']['models_folder'], newname)
         agent.model.save(saved_model_path)

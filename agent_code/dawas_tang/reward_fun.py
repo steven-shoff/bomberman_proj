@@ -156,8 +156,8 @@ def compute_reward(agent):
     # print('check: {}, total reward: {}'.format('here', total_reward))
     if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
 
-        if len(agent.last_moves) >= 3 and (x, y) != agent.last_moves[-2]:
-            total_reward += 1
+        if len(agent.last_moves) >= 3 and (x, y) == agent.last_moves[-2]:
+            total_reward -= 2
 
     if last_action == 'WAIT':
         total_reward -= 5

@@ -12,9 +12,9 @@
     "scores_name": "nnmodel_0score.txt"
   },
   "model_config":{
-    "eps":0.2,
-    "gamma": 0.9,
-    "eps_discount":0.9
+    "eps":0,
+    "gamma": 0.05,
+    "eps_discount":0.99
   },
   "workflow":{
     "train":1,
