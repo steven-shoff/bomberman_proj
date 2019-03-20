@@ -2,12 +2,12 @@
   "training":{
     "models_folder":"agent_code/dawas_tang/models",
     "model_name":"",
-    "save_model":"first_conv_model_coins.h5",
+    "save_model":"first_conv_model_coins_DDQN_plain_rewards_new_state.h5",
     "weights_path":"",
     "pretrained":0,
     "max_memory_size": 5000,
     "conv": 1,
-    "reset_interval": 1000
+    "reset_interval": 250
   },
   "playing":{
     "eps":1.0,

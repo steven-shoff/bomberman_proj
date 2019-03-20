@@ -120,3 +120,4 @@ py/
 requirements.txt
 test.py
 eps.txt
+agent_code/dawas_tang/training_log.txt

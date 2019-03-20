@@ -17,13 +17,13 @@ def det_valid_action(state, other_loc=None):
     others = [(xo, yo) for (xo, yo, _, _, _) in state['others']]
     bombs_pos = [(xb, yb) for (xb, yb, tb) in bombs]
 
-    if arena[x, y-1] == 1 or (x, y-1) in bombs_pos or (x, y-1) in others:
+    if arena[x, y-1] != 0 or (x, y-1) in bombs_pos or (x, y-1) in others:
         valid_actions.remove('UP')
-    if arena[x, y+1] == 1 or (x, y+1) in bombs_pos or (x, y+1) in others:
+    if arena[x, y+1] != 0 or (x, y+1) in bombs_pos or (x, y+1) in others:
         valid_actions.remove('DOWN')
-    if arena[x-1, y] == 1 or (x-1, y) in bombs_pos or (x-1, y) in others:
+    if arena[x-1, y] != 0 or (x-1, y) in bombs_pos or (x-1, y) in others:
         valid_actions.remove('LEFT')
-    if arena[x+1, y] == 1 or (x+1, y) in bombs_pos or (x+1, y) in others:
+    if arena[x+1, y] != 0 or (x+1, y) in bombs_pos or (x+1, y) in others:
         valid_actions.remove('RIGHT')
     if bombs_left == 0:
         valid_actions.remove('BOMB')
@@ -40,7 +40,6 @@ def compute_reward(agent):
     last_action = agent.next_action
 
     total_reward = 0
-    state = state.copy()
     arena = state['arena'].copy()
     all_bombs = state['bombs']
 
@@ -49,7 +48,7 @@ def compute_reward(agent):
     (x, y, _, nb, _) = state['self']
 
     coord_dict = {'UP': (0, -1), 'DOWN': (0, 1), 'LEFT': (-1, 0), 'RIGHT': (1, 0), 'BOMB': (0, 0), 'WAIT': (0, 0)}
-    last_x, last_y = np.subtract((x, y), coord_dict[last_action])
+    last_x, last_y = np.subtract((x, y), coord_dict[last_action]) if 6 not in events else (x, y)
     old_coord = None
     all_coord = []
     # Predict future events:
@@ -123,20 +122,25 @@ def compute_reward(agent):
 
     crates_arena = np.maximum(arena, 0)
     crates_arena = crates_arena.T
+    all_bombs_loc = [(xb, yb) for (xb, yb, _) in all_bombs]
 
-    if len(state['coins']) != 0:
-        last_closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
+    # Coin Environment
+    if len(state['coins']) != 0 and 11 not in events:
 
-        if abs(last_closest_coin[0] - last_x) + abs(last_closest_coin[1] - last_y) > \
-                abs(last_closest_coin[0] - x) + abs(last_closest_coin[1] - y) and 6 not in events:
+        arrowcoord = [(last_x, last_y - 1), (last_x, last_y + 1), (last_x - 1, last_y), (last_x + 1, last_y)]
+        possible_coord = [(xc, yc) for (xc, yc) in arrowcoord if arena[xc, yc] != -1 and (xc, yc) not in state['others'] and (xc, yc) not in all_bombs_loc]
+        sorted_coins = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))
+        check_coin = [sorted_coins[0], sorted_coins[0]] if len(sorted_coins) == 1 else [sorted_coins[0], sorted_coins[1]]
+        minarrowcoord = sorted(possible_coord, key=lambda k: ((check_coin[0][0] - k[0]) ** 2 + (
+                    check_coin[0][1] - k[1]) ** 2) * 1 + ((check_coin[1][0] - k[0]) ** 2 + (
+                    check_coin[1][1] - k[1]) ** 2) * 0.001)[0]
+
+        if (x, y) == minarrowcoord:
             total_reward += 3
-        elif 6 not in events and last_action != 'WAIT':
-            arrowcoord = [(last_x, last_y-1), (last_x, last_y+1), (last_x-1, last_y), (last_x+1, last_y)]
-            minarrowcoord = sorted(arrowcoord, key=lambda k: abs(last_closest_coin[0] - k[0]) + abs(last_closest_coin[1] - k[1]))[0]
+        else:
+            total_reward -= 3
 
-            if arena[minarrowcoord] == -1 and (minarrowcoord[0] - x)**2 + (minarrowcoord[1] - y)**2 < 4:
-                total_reward += 3
-
+    # Opponent Environment
     elif len(state['others']) != 0 and np.sum(crates_arena) == 0 and 6 not in events:
         last_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
         this_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
@@ -154,12 +158,31 @@ def compute_reward(agent):
         if np.argmax([q1map, q2map, q3map, q4map]) == s.actions.index(last_action):
             total_reward += 2
     # print('check: {}, total reward: {}'.format('here', total_reward))
-    if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
+    # if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
 
-        if len(agent.last_moves) >= 3 and (x, y) != agent.last_moves[-2]:
-            total_reward += 1
+        #if len(agent.last_moves) >= 3 and (x, y) == agent.last_moves[-2]:
+        #    total_reward += 2
 
     if last_action == 'WAIT':
         total_reward -= 5
 
     return total_reward
+
+def calc_explosion_effect(arena, test_loc):
+
+    xb, yb = test_loc
+    fill_map = list()
+
+    for c_down in range(1, 4):
+        if yb + c_down > 15 or arena[xb, yb + c_down] == -1: break
+        fill_map.append([xb, yb + c_down])
+    for c_up in range(1, 4):
+        if yb - c_up < 0 or arena[xb, yb - c_up] == -1: break
+        fill_map.append([xb, yb - c_up])
+    for c_right in range(1, 4):
+        if xb + c_right > 15 or arena[xb + c_right, yb] == -1: break
+        fill_map.append([xb + c_right, yb])
+    for c_left in range(1, 4):
+        if xb - c_left < 0 or arena['arena'][xb - c_left, yb] == -1: break
+        fill_map.append([xb - c_left, yb])
+    return fill_map
