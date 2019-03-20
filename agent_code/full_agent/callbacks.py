@@ -85,18 +85,12 @@ class GainExperience(object):
         selected_newstate = np.array(self.new_state)[selected_index]
         selected_terminal = np.array(self.terminal)[selected_index]
 
-        selected_target = []
-        for _s, a, r, s_, t in zip(selected_oldstate, selected_actions, selected_rewards, selected_newstate, selected_terminal):
-            _s = np.expand_dims(_s, axis=0)
-            target = eval_net.predict(_s)[0]
-            s_ = np.expand_dims(s_, axis=0)
-            if not t:
-                max_predict = np.max(self.target_net.predict(s_)[0])
-                target[a] = r + self.discount_rate * max_predict
-            else:
-                target[a] = r
-            selected_target.append(target)
-        return selected_oldstate, np.array(selected_target)
+        target = eval_net.predict(selected_oldstate)
+        renewed_target = selected_rewards + np.max(self.target_net.predict(selected_newstate), axis=1)*selected_terminal*(1 - int(self.discount_rate))
+
+        for idx, a in enumerate(selected_actions):
+            target[idx, a] = renewed_target[idx]
+        return selected_oldstate, target
 
 
 def setup(agent):

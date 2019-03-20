@@ -178,6 +178,7 @@ def setup(agent):
             agent.logger.info("An error occured in loading the model")
             sys.exit(-1)
     agent.mybomb = None
+    agent.randoms = False
     # For reward computation
     agent.last_moves = []
 
@@ -210,12 +211,14 @@ def act(agent):
                 choice = np.random.choice(['RIGHT', 'LEFT', 'UP', 'DOWN', 'BOMB','WAIT'])
                 print(f'Random choice: {choice}')
                 agent.next_action = choice
+                agent.randoms = True
             else:
                 current_state = np.expand_dims(current_state,axis=0)
                 prediction = agent.experience.predict(current_state)
                 action_idx = np.argmax(prediction)
                 print(f'prediction: {prediction}, {s.actions[action_idx]}')
                 agent.next_action = s.actions[action_idx]
+                agent.randoms = False
         else:
             if len(agent.last_moves) >= 10:
                 del agent.last_moves[0]

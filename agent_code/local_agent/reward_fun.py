@@ -174,7 +174,7 @@ def calc_explosion_effect(arena, test_loc, fill_map=None, fill_values=0):
         for idx in range(len(fill_map)):
             fill_map[idx][xb + c_right, yb] = fill_values[idx]
     for c_left in range(1, 4):
-        if xb - c_left < 0 or arena['arena'][xb - c_left, yb] == -1: break
+        if xb - c_left < 0 or arena[xb - c_left, yb] == -1: break
         for idx in range(len(fill_map)):
             fill_map[idx][xb - c_left, yb] = fill_values[idx]
     return fill_map
@@ -192,6 +192,7 @@ def find_nearest_thing(thing, arena, test_loc, possible_coord):
 
 
 def compute_reward(agent):
+    print('started')
     events = agent.events
 
     last_action = agent.next_action
@@ -205,7 +206,7 @@ def compute_reward(agent):
     mybomb = agent.mybomb
     all_bombs = state['bombs']
     all_bombs_loc = [(xb, yb) for (xb, yb, _) in all_bombs]
-    all_op_loc = [op[0:2] for op in state['coins']]
+    all_op_loc = [op[0:2] for op in state['others']]
 
     (x, y, _, nb, _) = state['self']
     coord_dict = {'UP': (0, -1), 'DOWN': (0, 1), 'LEFT': (-1, 0), 'RIGHT': (1, 0), 'BOMB': (0, 0), 'WAIT': (0, 0)}
@@ -221,17 +222,20 @@ def compute_reward(agent):
 
     # Situation Flag
     escape = False
-    no_coins = len(state['others']) == 0
+    place_bomb = False
+    no_coins = len(state['coins']) == 0
     no_crates = np.sum(np.maximum(arena, 0)) == 0
     no_opponents = len(state['others']) == 0
 
+    if 6 in events:
+        print('Fucked up')
     # Primary Reward
     for event in events:
         total_reward += list(rewards.values())[event]
 
     # Evaludate Bomb and Escape Policy
     # Estimate future events: t + 1, t + 2, t + 3, t + 4
-    for t0 in range(0, 4):
+    for t0 in range(0, 5):
 
         # Find all possible coordinates after t0 steps
         if t0 == 0:
@@ -247,53 +251,51 @@ def compute_reward(agent):
         all_coord.append(next_coord)
         old_coord = next_coord
 
-        if t0 <= 4:  # Bomb Policy
-            # find bombs nearby in the future time step
-            bombs_t = [(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if tb == t0 and abs(xb - x) + abs(yb - y) <= 4]
 
-            # Set flag for existing bombs nearby
-            if len(bombs_t) != 0:
+        # find bombs nearby in the future time step
+        bombs_t = [(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if tb == t0 and abs(xb - x) + abs(yb - y) <= 4]
+
+        deatharea = np.minimum(state['explosions'].copy(), 1) * 3 - 2  # -2 or 1
+        bombarea = np.zeros(arena.shape)
+        for xb, yb, tb in bombs_t:
+
+            bfactor = 2
+            if len(bombs_t) != 0 and (xb, yb) != mybomb and t0 != 4 not in bombs_t and not escape:
                 escape = True
-                print('Rscape Policy')
+                print('Escape Policy')
+            elif (xb, yb) == mybomb and t0 == 4:
+                place_bomb = True
+                bfactor = 5
 
-            deatharea = np.minimum(state['explosions'].copy(), 1) * 3 - 2  # -2 or 1
-            bombarea = np.zeros(arena.shape)
-            for xb, yb, tb in bombs_t:
+            deatharea[xb, yb] = 1
+            deatharea, bombarea = calc_explosion_effect(state['arena'], (xb, yb), [deatharea, bombarea], [1, bfactor])
 
-                bfactor = 2
+            # Penalize if not escaping
+            if (xb - x) ** 2 + (yb - y) ** 2 < (xb - last_x) ** 2 + (yb - last_y) ** 2:
+                total_reward -= 2
 
-                if (xb, yb) == mybomb:
-                    bfactor = 5
+        # Penalize for entering the death zone
+        check_map = np.array([deatharea[pos] for pos in next_coord])
+        if np.equal(check_map, 1).all():
+            total_reward -= 10
 
-                deatharea[xb, yb] = 1
-                deatharea, bombarea = calc_explosion_effect(state['arena'], (xb, yb), [deatharea, bombarea], [1, bfactor])
+        # Reward for placing good crates
+        elif nb == 0 and place_bomb:
+            pass
+            crates_destroy = np.sum(np.equal(bombarea, state['arena'] + 4))  # Number of crates the placed bomb can destroy
+            if crates_destroy != 0:
+                total_reward += 2 + crates_destroy
+            else:
+                total_reward -= 5
 
-                # Penalize if not escaping
-                if (xb - x) ** 2 + (yb - y) ** 2 < (xb - last_x) ** 2 + (yb - last_y) ** 2:
-                    total_reward -= 2
+        # Good wait compensation
+        elif np.sum(check_map) == len(check_map) - 1 and last_action == 'WAIT' and deatharea[(x, y)] == -2:
+            total_reward += 6
 
-            # Penalize for entering the death zone
-            check_map = np.array([deatharea[pos] for pos in next_coord])
-            if np.equal(check_map, 1).all():
-                total_reward -= 10
-
-            # Reward for placing good crates
-            elif nb == 0 and (mybomb[0], mybomb[1], 4) in bombs_t and t0 == 4:
-                crates_destroy = np.sum(
-                    np.equal(bombarea, state['arena'] + 4))  # Number of crates the placed bomb can destroy
-                if crates_destroy != 0:
-                    total_reward += 2 + crates_destroy
-                else:
-                    total_reward -= 5
-
-            # Good wait compensation
-            elif np.sum(check_map) == len(check_map) - 1 and last_action == 'WAIT' and deatharea[(x, y)] == -2:
-                total_reward += 6
-
-            # Estimate state in next step
-            bombarea = np.minimum(bombarea, 2)
-            state['arena'][np.equal(deatharea, state['arena'])] = 0
-            state['explosions'] = np.maximum(state['explosions'] - 1, bombarea)
+        # Estimate state in next step
+        bombarea = np.minimum(bombarea, 2)
+        state['arena'][np.equal(deatharea, state['arena'])] = 0
+        state['explosions'] = np.maximum(state['explosions'] - 1, bombarea)
 
     if not escape and 11 not in events and 6 not in events:
 
@@ -311,6 +313,7 @@ def compute_reward(agent):
             nearest_op = None
             nearest_op_coord = None
 
+        print('Finding case:')
         # Case 1 Break Crates
         if not opponent_in_sight and no_coins:
 
@@ -322,7 +325,7 @@ def compute_reward(agent):
 
                 test_effect = calc_explosion_effect(arena, (px, py), np.zeros(arena.shape), 1)
                 test_crates_destroyed = np.sum(np.minimum(test_effect, np.absolute(arena)))
-                if test_crates_destroyed > highest_crates_destroyed:
+                if test_crates_destroyed > highest_crates_destroyed and arena[px, py] != 1:
                     best_coord = (px, py)
                     highest_crates_destroyed = test_crates_destroyed
 
@@ -346,7 +349,10 @@ def compute_reward(agent):
                     total_reward -= 3
 
             elif best_coord == (last_x, last_y):
-                if nb != 0:
+
+                if place_bomb and (x, y) == best_coord:
+                    total_reward += 3
+                else:
                     total_reward -= 3
 
             elif best_coord == (x, y):
@@ -357,7 +363,9 @@ def compute_reward(agent):
 
             print('Case 2')
             if nearest_op in nocrates_coord and all_coord[1] <= 2:
-                if last_action != 'WAIT' or nb == 0:
+                if place_bomb:
+                    total_reward += 10
+                elif last_action != 'WAIT' or nb == 0:
                     total_reward += 3
                 else:
                     total_reward -= 3
@@ -376,6 +384,7 @@ def compute_reward(agent):
                 astar_map[bx, by] = 1000
                 astar_map[last_x, last_y] = 0
 
+            print('Passed')
             best_path, best_act = find_best_move(astar_map, (last_x, last_y), nearest_coin) # A* algo
             if best_act[0] == 'MOVE' and best_path[1] == (x, y):
                 total_reward += 3

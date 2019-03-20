@@ -4,6 +4,7 @@ import numpy as np
 from random import randint
 from agent_code.local_agent.rewards_table import rewards
 from agent_code.local_agent.diamond_nn.nn_model import *
+from agent_code.local_agent.reward_fun import *
 from settings import s
 import time
 import keras
@@ -85,18 +86,14 @@ class GainExperience(object):
         selected_newstate = np.array(self.new_state)[selected_index]
         selected_terminal = np.array(self.terminal)[selected_index]
 
-        selected_target = []
-        for _s, a, r, s_, t in zip(selected_oldstate, selected_actions, selected_rewards, selected_newstate, selected_terminal):
-            _s = _s.reshape((1, 45))
-            target = eval_net.predict(_s)[0]
-            s_ = s_.reshape((1, 45))
-            if not t:
-                max_predict = np.max(self.target_net.predict(s_)[0])
-                target[a] = r + self.discount_rate * max_predict
-            else:
-                target[a] = r
-            selected_target.append(target)
-        return selected_oldstate.reshape((-1, 45)), np.array(selected_target)
+        selected_oldstate = selected_oldstate.reshape((-1, 45))
+        target = eval_net.predict(selected_oldstate)
+        selected_newstate = selected_newstate.reshape((-1, 45))
+        renewed_target = selected_rewards + np.max(self.target_net.predict(selected_newstate), axis=1)*selected_terminal*(1 - int(self.discount_rate))
+
+        for idx, a in enumerate(selected_actions):
+            target[idx, a] = renewed_target[idx]
+        return selected_oldstate, target
 
 
 def setup(agent):
@@ -165,7 +162,7 @@ def setup(agent):
     # experience = GainExperience(model=agent.model,memory_size=s.max_steps,discount_rate=0.99)
     target_net = keras.models.clone_model(agent.model)
     target_net.set_weights(agent.model.get_weights())
-    experience = GainExperience(model=target_net, memory_size=32768, batch_size=512, discount_rate=agent.config["model_config"]["gamma"])
+    experience = GainExperience(model=target_net, memory_size=65536, batch_size=1024, discount_rate=agent.config["model_config"]["gamma"])
 
     agent.experience = experience
     agent.mybomb = None
@@ -173,6 +170,7 @@ def setup(agent):
     eps = agent.config["model_config"]["eps"]
     agent.eps = eps
     agent.total_reward = 0
+    agent.randoms = False
 
     # For reward computation
     agent.last_moves = []
@@ -211,12 +209,14 @@ def act(agent):
                 agent.logger.info('Selecting action at Random for exploring...')
 
                 #valid_actions = det_valid_action(state)
-                agent.next_action = np.random.choice(s.actions[0:-2])
+                agent.next_action = np.random.choice(s.actions)
+                agent.randoms = True
             else:
                 prediction = agent.model.predict(current_state)[0]
                 action_idx = np.argmax(prediction)
                 agent.next_action = s.actions[action_idx]
-                print(prediction)
+                # print(prediction)
+                agent.randoms = False
         else:
             prediction = agent.model.predict(current_state)[0]
             action_idx = np.argmax(prediction)
@@ -234,33 +234,6 @@ def act(agent):
             agent.score_file.write('{} {} {} {}\n'.format(agent.timetick, agent.olddig, state['step'], score))
     except Exception as e:
         print(f'Error occured with message: {str(e)}')
-
-
-def det_valid_action(state, other_loc=None):
-
-    valid_actions = s.actions.copy()
-    arena = np.absolute(state['arena'].copy())
-    bombs = state['bombs']
-    x, y, _, bombs_left, _ = state['self']
-    if other_loc is not None:
-        x, y = other_loc
-
-    others = [(xo, yo) for (xo, yo, _, _, _) in state['others']]
-    bombs_pos = [(xb, yb) for (xb, yb, tb) in bombs]
-
-    if arena[x, y-1] == 1 or (x, y-1) in bombs_pos or (x, y-1) in others:
-        valid_actions.remove('UP')
-    if arena[x, y+1] == 1 or (x, y+1) in bombs_pos or (x, y+1) in others:
-        valid_actions.remove('DOWN')
-    if arena[x-1, y] == 1 or (x-1, y) in bombs_pos or (x-1, y) in others:
-        valid_actions.remove('LEFT')
-    if arena[x+1, y] == 1 or (x+1, y) in bombs_pos or (x+1, y) in others:
-        valid_actions.remove('RIGHT')
-    if bombs_left == 0:
-        valid_actions.remove('BOMB')
-    if (x, y) in bombs_pos:
-        valid_actions.remove('WAIT')
-    return valid_actions
 
 
 def reward_update(agent):
@@ -299,7 +272,7 @@ def send_to_experience(agent, exit_game=False):
     new_experience = [last_action, agent.total_reward, new_state]
 
     agent.experience.expand_experience(new_experience, exit_game=exit_game)
-    if agent.experience.experiences_count >= 128:
+    if agent.experience.experiences_count >= 100:
         train(agent, agent.experience.rounds_count, exit_game)
 
 
@@ -309,6 +282,7 @@ def formulate_state(state):
     :param state             : Dictionary contains raw game information
     :return determined_state: determined state
     """
+
     arena = state['arena'].copy()
     crates_arena = np.maximum(arena, 0)
     for (cx, cy) in state['coins']:
@@ -331,11 +305,16 @@ def formulate_state(state):
     if np.sum(crates_arena) == 0:
         diglist.append(5)
     else:
-        q1map = np.sum(crates_arena[:y, :])
-        q2map = np.sum(crates_arena[y+1:, :])
-        q3map = np.sum(crates_arena[:, :x])
-        q4map = np.sum(crates_arena[:, x+1:])
-        diglist.append(np.argmax([q1map, q2map, q3map, q4map]) + 1)
+        q1map = np.sum(crates_arena[1:6, 1:6])
+        q2map = np.sum(crates_arena[1:6, 6:11])
+        q3map = np.sum(crates_arena[1:6, 11:16])
+        q4map = np.sum(crates_arena[6:11, 1:6])
+        q5map = np.sum(crates_arena[6:11, 6:11])
+        q6map = np.sum(crates_arena[6:11, 11:16])
+        q7map = np.sum(crates_arena[11:16, 1:6])
+        q8map = np.sum(crates_arena[11:16, 6:11])
+        q9map = np.sum(crates_arena[11:16, 11:16])
+        diglist.append(np.argmax([q1map, q2map, q3map, q4map, -1, q5map, q6map, q7map, q8map, q9map]) + 1)
 
     if len(state['others']) == 0:
         diglist.append(5)
@@ -396,144 +375,6 @@ def formulate_state(state):
 
     state = np.array(diglist)
     return state.reshape((1, 45))
-
-
-def compute_reward(agent):
-
-    events = agent.events
-    state = agent.game_state.copy()
-    mybomb = agent.mybomb
-    last_action = agent.next_action
-
-    total_reward = 0
-    state = state.copy()
-    arena = state['arena'].copy()
-    all_bombs = state['bombs']
-
-    for event in events:
-        total_reward += list(rewards.values())[event]
-    (x, y, _, nb, _) = state['self']
-
-    coord_dict = {'UP': (0, -1), 'DOWN': (0, 1), 'LEFT': (-1, 0), 'RIGHT': (1, 0), 'BOMB': (0, 0), 'WAIT': (0, 0)}
-    last_x, last_y = np.subtract((x, y), coord_dict[last_action]) if 6 not in events else (x, y)
-    old_coord = None
-    all_coord = []
-    # Predict future events:
-    # t + 1, t + 2, t + 3, t + 4
-    for t0 in range(0, 5):
-        if t0 == 0:
-            next_coord = [(x, y)]
-        # Find all possible coordinates in future steps
-        else:
-            next_coord = []
-            for coord in old_coord:
-                next_coord += [np.add(coord, coord_dict[i]) for i in
-                               det_valid_action(state, other_loc=coord)]  # Possible coordinates in 2nd Step
-            if len(next_coord) != 0:
-                next_coord = [tuple(i) for i in np.unique(next_coord, axis=0)]
-        all_coord.append(next_coord)
-        old_coord = next_coord
-
-        # find bombs in the future time step
-        bombs_t = [(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if tb == t0 and abs(xb -x) + abs(yb-y) <= 4]
-        deatharea = np.minimum(state['explosions'].copy(), 1) * 3 - 2  # -2 or 1
-        bombarea = np.zeros(arena.shape)
-        for xb, yb, tb in bombs_t:
-
-            bfactor = 2
-
-            if (xb, yb) == mybomb:
-                bfactor = 5
-
-            deatharea[xb, yb] = 1
-            for c_down in range(1, 4):
-                if yb + c_down > 16 or state['arena'][xb, yb + c_down] == -1:
-                    break
-                deatharea[xb, yb + c_down] = 1
-                bombarea[xb, yb + c_down] = bfactor
-
-            for c_up in range(1, 4):
-                if yb - c_up < 0 or state['arena'][xb, yb - c_up] == -1:
-                    break
-                deatharea[xb, yb - c_up] = 1
-                bombarea[xb, yb - c_up] = bfactor
-            for c_right in range(1, 4):
-                if xb + c_right > 16 or state['arena'][xb + c_right, yb] == -1:
-                    break
-                deatharea[xb + c_right, yb] = 1
-                bombarea[xb + c_right, yb] = bfactor
-            for c_left in range(1, 4):
-                if xb - c_left < 0 or state['arena'][xb - c_left, yb] == -1:
-                    break
-                deatharea[xb - c_left, yb] = 1
-                bombarea[xb - c_left, yb] = bfactor
-
-            if abs(xb -x) + abs(yb-y) < abs(xb -last_x) + abs(yb-last_y):
-                total_reward -= 2
-        check_map = np.array([deatharea[pos] for pos in next_coord])
-        if np.equal(check_map, 1).all():
-            total_reward -= 10
-        elif nb == 0 and (mybomb[0], mybomb[1], 4) in bombs_t and t0 == 4:
-            crates_destroy = np.sum(np.equal(bombarea, state['arena']+4))  # Number of crates the placed bomb can destroy
-            if crates_destroy != 0:
-                total_reward += 2 + crates_destroy
-            else:
-                total_reward -= 5
-        elif np.sum(check_map) == len(check_map) - 1 and last_action == 'WAIT' and deatharea[(x, y)] == -2:
-            total_reward += 6  # good WAIT compensation
-
-        # Predict state in next step
-        bombarea = np.minimum(bombarea, 2)
-        state['arena'][np.equal(deatharea, arena)] = 0
-        state['explosions'] = np.maximum(state['explosions'] - 1, bombarea)
-
-    crates_arena = np.maximum(arena, 0)
-    crates_arena = crates_arena.T
-    all_bombs_loc = [(xb, yb) for (xb, yb, _) in all_bombs]
-
-    # Coin Environment
-    if len(state['coins']) != 0 and 11 not in events:
-
-        arrowcoord = [(last_x, last_y - 1), (last_x, last_y + 1), (last_x - 1, last_y), (last_x + 1, last_y)]
-        possible_coord = [(xc, yc) for (xc, yc) in arrowcoord if arena[xc, yc] != -1 and (xc, yc) not in state['others'] and (xc, yc) not in all_bombs_loc]
-        sorted_coins = sorted(state['coins'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))
-        check_coin = [sorted_coins[0], sorted_coins[0]] if len(sorted_coins) == 1 else [sorted_coins[0], sorted_coins[1]]
-        minarrowcoord = sorted(possible_coord, key=lambda k: ((check_coin[0][0] - k[0]) ** 2 + (
-                    check_coin[0][1] - k[1]) ** 2) * 1 + ((check_coin[1][0] - k[0]) ** 2 + (
-                    check_coin[1][1] - k[1]) ** 2) * 0.001)[0]
-
-        if (x, y) == minarrowcoord:
-            total_reward += 3
-        else:
-            total_reward -= 3
-
-    # Opponent Environment
-    elif len(state['others']) != 0 and np.sum(crates_arena) == 0 and 6 not in events:
-        last_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - last_x) + abs(k[1] - last_y))[0]
-        this_closest_p = sorted(state['others'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
-
-        if abs(last_closest_p[0] - last_x) + abs(last_closest_p[1] - last_y) > \
-                abs(this_closest_p[0] - x) + abs(this_closest_p[1] - y):
-            total_reward += 2
-
-    elif np.sum(crates_arena) != 0 and len(all_bombs) == 0 and 6 not in events:
-        q1map = np.sum(crates_arena[:y, :])
-        q2map = np.sum(crates_arena[y + 1:, :])
-        q3map = np.sum(crates_arena[:, :x])
-        q4map = np.sum(crates_arena[:, x + 1:])
-
-        if np.argmax([q1map, q2map, q3map, q4map]) == s.actions.index(last_action):
-            total_reward += 2
-    # print('check: {}, total reward: {}'.format('here', total_reward))
-    # if len([(xb, yb, tb) for (xb, yb, tb) in state['bombs'] if abs(xb -last_x) + abs(yb-last_y) <= 4]) == 0:
-
-        #if len(agent.last_moves) >= 3 and (x, y) == agent.last_moves[-2]:
-        #    total_reward += 2
-
-    if last_action == 'WAIT':
-        total_reward -= 5
-
-    return total_reward
 
 
 def train(agent, train_tick=0, exit_game=False):
