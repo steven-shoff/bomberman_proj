@@ -1,270 +1,248 @@
-import time
-import numpy as np
-from agent_code.dawas_tang.nn_model import *
+import sys
 import json
+import time
+import keras
 from settings import s
 from random import randint
-import sys
-import os
-from keras.callbacks import ModelCheckpoint,TensorBoard
-from . import reward_fun
-from .rewards_table import rewards
+from agent_code.dawas_tang.diamond_nn.nn_model import *
+from agent_code.dawas_tang.reward_fun import *
+
 
 class GainExperience(object):
-    def __init__(self, train_model, target_model, memory_size, discount_rate):
-        '''
+    def __init__(self, model, memory_size, batch_size, discount_rate):
+        """
+        This class function collects experience from each steps and compute new Q(s, a)
+        :param model        : Model used to interact with the agent
+        :param memory_size  : Maximum memory loading for training model
+        :param batch_size   : Number of records selected for training
+        :param discount_rate: Discount rate of future rewards in the Q-learning algorithm
+        """
 
-        :param memory_size: amount of states to save at one time for training
-        :param discount_rate: discount rate of future rewards in the Q-learning algorithm
-        :param eps: Randomness threshold for choosing a new action randomely while training
-        :param eps_decay: Decaying rate for eps, we don't want it to be fixed during the entire training process
-        '''
-
+        # Class configuration attributes:
         self.max_memory_size = memory_size
+        self.batch_size = batch_size
+
+        # Class model attributes
         self.discount_rate = discount_rate
-        self.train_model = train_model
-        self.target_model = target_model
-        self.inputs = list()
-        self.targets = list()
+        self.target_net = model
+
+        # class attributes for memory storage
+        self.old_state = list()
+        self.reward = list()
+        self.actions = list()
+        self.new_state = list()
+        self.terminal = list()
+
         self.current_state = None
-        self.experiences_count = None
-        self.num_steps = 0
-        self.experiences = list()
-        self.rounds_count = 0
-        self.eps = None
 
-        with open('agent_code/dawas_tang/config.json') as f:
-            config = json.load(f)
+        self.experiences_count = 1     # Experience counter
+        self.rounds_count = 0           # Round counter
 
-        self.config = config
-        self.reset_interval = config["training"]["reset_interval"]
+    def expand_experience(self, experience, terminal=False):
+        """
+        This class function receives experience from agent and store s, Q(s,a) into inputs and targets
+        :param experience   : tuples containing <a, r, s'> where
+                                a - action selected in the current state
+                                r - reward of the action
+                                s'- new state received
+        :param terminal     : flag indicating the end of game
+        """
 
-    def expand_experience(self, experience):
-        # Recieved experience is: [action_selected, reward_earned, next_state, exit_game]
-        # updating the experience and add the current_state to it
-
-        self.num_steps += 1
-        experience.insert(0,self.current_state)
-
-        self.experiences.append(experience)
+        # Updating the experience and add the current_state to it
+        experience.insert(0, self.current_state)
 
         # Compute the target value for this state and add it directly into the training data buffers
-        self.experiences_count = len(self.experiences)
+        self.experiences_count += 1
 
-        if self.experiences_count > self.max_memory_size:
-            del self.experiences[0]
+        self.old_state.append(self.current_state)
+        self.actions.append(experience[1])
+        self.reward.append(experience[2])
+        self.new_state.append(experience[3])
+        self.terminal.append(terminal)
 
-        idx = list(range(self.experiences_count))
-        np.random.shuffle(idx)
-        limit = np.min([len(idx),400])
-        idx = idx[:limit]
-        input_batch = list()
-        target_batch = list()
+        if len(self.old_state) > self.max_memory_size:
+            del self.old_state[0]
+            del self.reward[0]
+            del self.actions[0]
+            del self.new_state[0]
+            del self.terminal[0]
 
-        for i in idx:
-            exp = self.experiences[i]
-            input_batch.append(exp[0])
-            action = exp[1]
-            reward = exp[2]
-            next_state = exp[3]
-            is_terminal = exp[4]
-            target_batch.append(self.calculate_targets(exp[0], action, reward, next_state, is_terminal))
+    def get_inputs_targets(self, eval_net):
+        """
+        This class function calculates new target using stored states and actions
+        :param eval_net : Training network which is used in act()
+        :return         : selected input state, calculated target
+        """
 
-        input_batch = np.array(input_batch)
-        target_batch = np.array(target_batch)
-        start = time.time()
-        self.train_model.fit(x=input_batch, y=target_batch, validation_split=0.0, epochs=10, verbose=1)
-        if self.num_steps % self.reset_interval == 0:
-            self.target_model.set_weights(self.train_model.get_weights())
-        end = time.time()
-        if self.rounds_count % 2 == 0:
-            with open('eps.txt','w') as f:
-                f.write(str(self.eps))
-            print(f'Finish training after round number: {self.rounds_count}, time elapsed: {end-start}'
-                  f'\nSaving model')
-            saved_model_path = os.path.join(self.config['training']['models_folder'],
-                                            self.config['training']['save_model'])
-            self.train_model.save(saved_model_path)
-
-        if experience[-1]:
-            print(f'Round # {self.rounds_count} finished\n')
-
-
-    def calculate_targets(self, current_state, action, reward, next_state, is_terminal=False):
-
-        current_state = np.expand_dims(current_state,axis=0)
-        target = self.predict(current_state)
-        if not is_terminal:
-            next_state = np.expand_dims(next_state,axis=0)
-            max_predict = np.max(self.target_model.predict(next_state)[0])
-            target[action] = reward + self.discount_rate * max_predict
+        if len(self.old_state) < self.batch_size:
+            selected_index = list(range(len(self.old_state)))
         else:
-            target[action] = reward
-        return target
+            selected_index = np.random.choice(list(range(len(self.old_state))), self.batch_size)
+        selected_oldstate = np.array(self.old_state)[selected_index]
+        selected_actions = np.array(self.actions)[selected_index]
+        selected_rewards = np.array(self.reward)[selected_index]
+        selected_newstate = np.array(self.new_state)[selected_index]
+        selected_terminal = np.array(self.terminal)[selected_index]
 
+        selected_oldstate = selected_oldstate.reshape((-1, 45))
+        target = eval_net.predict(selected_oldstate)
+        selected_newstate = selected_newstate.reshape((-1, 45))
+        renewed_target = selected_rewards + np.max(self.target_net.predict(selected_newstate), axis=1) * (
+                    1 - selected_terminal) * self.discount_rate
 
-
-    def predict(self,current_state):
-        prediction = self.train_model.predict(current_state)[0]
-        return prediction
-
-    def get_inputs(self):
-        return self.inputs
-
-    def get_targets(self):
-        return self.targets
+        for idx, a in enumerate(selected_actions):
+            target[idx, a] = renewed_target[idx]
+        return selected_oldstate, target
 
 
 def setup(agent):
+    print('ok')
+    """
+    This function performed the following actions in setup:
+        - Initialize GainExperience and model
+        - Load agent configuration file
 
-    # load config file that contains paths to the pretrained weights
+    :param agent: Agent used to interact with the Environment
+    """
+    # load config file that contains paths to the pretrained model
     with open('agent_code/dawas_tang/config.json') as f:
         config = json.load(f)
 
-    # store that config in the agent to be used later on
+    # store that config in the agent for later use
     agent.config = config
 
-    # load the flag of using pretrained weights
-    load_pretrained = agent.config["training"]["pretrained"]
-    agent.is_conv = agent.config["training"]["conv"]
+    # load the flag of using pretrained model
+    load_pretrained = agent.config["workflow"]["pretrained"]
 
     # if in training mode, we have two options: train from scratch or load weights
     if agent.config['workflow']['train']:
         if load_pretrained:
+
             # read the path of the model to be loaded
-
             try:
-                pretrained_model_path = os.path.join(agent.config['training']['models_folder'],
-                                                     agent.config['training']['model_name'])
-                train_model = read_model(pretrained_model_path)
-
-                if agent.is_conv:
-                    target_model = build_conv()
+                all_name = [fname for fname in os.listdir(agent.config['training']['models_folder']) if
+                            fname.startswith(agent.config['training']['model_name']) and fname.endswith("_model.h5")]
+                if len(all_name) != 0:
+                    all_name = sorted(all_name, key=lambda y: int(y[len(agent.config['training']['model_name']):-len("_model.h5")]))
                 else:
-                    target_model = build_model()
+                    all_name = ['0']
+                agent.pretrained_model_path = os.path.join(agent.config['training']['models_folder'], all_name[-1])
+                agent.olddig = all_name[-1][len(agent.config['training']['model_name']):-len("_model.h5")]
+                agent.model = load_model(agent.pretrained_model_path)
 
-                target_model.set_weights(train_model.get_weights())
             # read_model method raises exceptions to be caught here
             except FileNotFoundError:
                 agent.logger.info("No model is specified to load")
                 sys.exit(-1)
-            except Exception:
-                agent.logger.info("An error occured in loading the model")
+            except Exception as e:
+                agent.logger.info("An error occured in loading the model: {}".format(e))
                 sys.exit(-1)
         else:
             # build model to be trained from scratch if no pre-trained weights specified
-            if not agent.is_conv:
-                train_model = build_model()
-                target_model = build_model()
-                target_model.set_weights(train_model.get_weights())
-            else:
-                train_model = build_conv()
-                target_model = build_conv()
-                target_model.set_weights(train_model.get_weights())
-
-        max_memory_size = agent.config['training']['max_memory_size']
-        experience = GainExperience(train_model=train_model, target_model = target_model, memory_size=max_memory_size, discount_rate=0.99)
-        agent.experience = experience
-        agent.experience.eps = agent.config["playing"]["eps"]
+            agent.model = build_model()
+            agent.olddig = 0
     else:
         try:
-            pretrained_model_path = os.path.join(agent.config['training']['models_folder'],
-                                                 agent.config['training']['model_name'])
-            agent.model = read_model(pretrained_model_path)
+            agent.pretrained_model_path = os.path.join(agent.config['playing']['models_folder'], agent.config['playing']['model_name'])
+            agent.model = load_model(agent.pretrained_model_path)
+            agent.olddig = agent.config['playing']['model_name'][len(agent.config['training']['model_name']):-len("_model.h5")]
         except FileNotFoundError:
-            agent.logger.info(f"Model file is not found, file name: {pretrained_model_path}")
+            agent.logger.info(f"Model file is not found, file name: {agent.pretrained_model_path}")
             sys.exit(-1)
-        except Exception:
-            agent.logger.info("An error occured in loading the model")
+        except Exception as e:
+            agent.logger.info("An error occured in loading the model: {}".format(e))
             sys.exit(-1)
-    agent.mybomb = None
-    agent.randoms = False
-    # For reward computation
-    agent.last_moves = []
 
+    # clone evaluation network to target network
+    target_net = keras.models.clone_model(agent.model)
+    target_net.set_weights(agent.model.get_weights())
+
+    # initialize experience object
+    experience = GainExperience(model=target_net, memory_size=65536, batch_size=1024, discount_rate=agent.config["model_config"]["gamma"])
+    agent.experience = experience
+
+    # other object attributes
+    agent.mybomb = None
+    eps = agent.config["model_config"]["eps"]
+    agent.eps = eps
+    agent.total_reward = 0
 
 
 def act(agent):
-
-    # agent.logger.info('Pick action according to pressed key')
-    # agent.next_action = agent.game_state['user_input']
+    """
+    This function defines the action in current step
+    :param agent: Agent used to interact with the Environment
+    :return:
+    """
 
     try:
-        state = agent.game_state
-        current_state = formulate_state(state, agent.is_conv)
-        current_pos = state['self'][0:2]
+        state = agent.game_state.copy()
+        (x, y, _, nb, _) = state['self']
+        if state['step'] == 1:
+            agent.total_reward = 0
+            agent.experience.rounds_count += 1
+
+        current_state = formulate_state(state)
+        agent.logger.info(f'current state from act: {current_state}')
+
         if agent.config['workflow']['train']:
             agent.experience.current_state = current_state
-            if state['step'] == 1:
-                agent.experience.rounds_count += 1
-                agent.last_moves = [current_pos]
-            elif len(agent.last_moves) >= 10:
-                del agent.last_moves[0]
-                agent.last_moves.append(current_pos)
-            else:
-                agent.last_moves.append(current_pos)
 
             rnd = randint(1, 100)
-            ths = int(agent.experience.eps * 100)
+            ths = int(agent.eps * 100)
             if rnd < ths:
                 agent.logger.info('Selecting action at Random for exploring...')
-                choice = np.random.choice(['RIGHT', 'LEFT', 'UP', 'DOWN', 'BOMB','WAIT'])
-                print(f'Random choice: {choice}')
-                agent.next_action = choice
-                agent.randoms = True
+                agent.next_action = np.random.choice(s.actions.copy())
             else:
-                current_state = np.expand_dims(current_state,axis=0)
-                prediction = agent.experience.predict(current_state)
+                prediction = agent.model.predict(current_state)[0]
                 action_idx = np.argmax(prediction)
-                print(f'prediction: {prediction}, {s.actions[action_idx]}')
                 agent.next_action = s.actions[action_idx]
-                agent.randoms = False
         else:
-            if len(agent.last_moves) >= 10:
-                del agent.last_moves[0]
-                agent.last_moves.append(current_pos)
-            else:
-                agent.last_moves.append(current_pos)
-            last_four = agent.last_moves[-4:]
-            force_to_move = True if last_four[0] == last_four[2] and last_four[1] == last_four[3] else False
-            current_state = np.expand_dims(current_state, axis=0)
+
             prediction = agent.model.predict(current_state)[0]
-            valid_actions = reward_fun.det_valid_action(agent.game_state)
-            # action_idx = np.argmax(prediction)
-            sorted_pred = prediction.argsort()[::-1]
-            for pred in sorted_pred:
-                if s.actions[pred] not in valid_actions or force_to_move:
-                    force_to_move = False
-                    continue
-                else:
-                    action_name = s.actions[pred]
-                    break
-            print(f'{prediction}, {action_name}')
-            agent.next_action = action_name
+            action_idx = np.argmax(prediction)
+            agent.next_action = s.actions[action_idx]
+            print('Q-value Prediction: {}'.format(prediction))
+            print('Next Action: {}'.format(agent.next_action))
 
         if agent.next_action == 'BOMB':
-            agent.mybomb = current_pos
+            agent.mybomb = (x, y)
 
     except Exception as e:
         print(f'Error occured with message: {str(e)}')
 
 
 def reward_update(agent):
+    """
+    This function write new state and performance into Experience
+    :param agent: Agent used to interact with the Environment
+    :return:
+    """
 
     send_to_experience(agent)
-    if agent.experience.num_steps % 50 == 0 and agent.experience.eps > 0.1:
-        agent.experience.eps *= agent.config["playing"]["eps_discount"]
-        if agent.experience.eps < 0.1: agent.experience.eps = 0.1
 
 
 def end_of_episode(agent):
-
-    # Get the last state of the game after the last step
-    # add the last experience to the buffer in GainExperience object
+    """
+    This function get the last state of the episode and write it to Experience
+    :param agent: Agent used to interact with the Environment
+    :return:
+    """
     send_to_experience(agent, exit_game=True)
+
+    # update epsilon value and target network for training
+    if agent.experience.rounds_count % agent.config["model_config"]["update_freq"] == 0:
+        agent.eps = max([0.1, agent.eps*agent.config["model_config"]["eps_discount"]])
+        agent.experience.target_net.set_weights(agent.model.get_weights())
 
 
 def send_to_experience(agent, exit_game=False):
+    """
+    This function formulate new state, calculate reward and store all calculated information into Experience
+    :param agent    : Agent used to interact with the Environment
+    :param exit_game: Flag indicating the end of episode
+    :return:
+    """
 
     last_action = s.actions.index(agent.next_action)
 
@@ -272,98 +250,153 @@ def send_to_experience(agent, exit_game=False):
     state = agent.game_state
 
     # formulate state in the required shape
-    new_state = formulate_state(state, agent.is_conv)
+    new_state = formulate_state(state)
 
     # get events happened in the last step
     events = agent.events
 
     # formulate reward
-    reward = compute_reward(agent)
+    agent.total_reward = compute_reward(agent)
+
+    print('LOC; {}, ACTION: {}, REWARD: {}'.format((agent.game_state['self'][0:2]), agent.next_action, agent.total_reward))
 
     # create one experience and save it into GainExperience object
-    new_experience = [last_action, reward, new_state, exit_game]
-    agent.experience.expand_experience(new_experience)
+    new_experience = [last_action, agent.total_reward, new_state]
+    terminal = True if any([i in events for i in list(range(7, 17))]) else False
+    agent.experience.expand_experience(new_experience, terminal=terminal)
+
+    # start training when the number of experience is big enough
+    if agent.experience.experiences_count >= 100:
+        train(agent, agent.experience.rounds_count, exit_game)
 
 
+def formulate_state(state):
+    """
+    This class function determines states by digesting information
+    :param state             : Dictionary contains raw game information
+    :return determined_state : determined state
+    """
 
-def formulate_state(state, is_conv):
-    # Extracting info about the game
+    # Initalize all necessary infomration
     arena = state['arena'].copy()
-    self_xy = state['self'][0:2]
-    others = [(x,y) for (x,y,n,b,_) in state['others']]
-    bombs = [(x,y) for (x,y,t) in state['bombs']]
-    bombs_times = [t for (x,y,t) in state['bombs']]
-    explosions = state['explosions']
-    coins = state['coins']
-    # Enriching the arena with info about own locations, bombs, explosions, opponent positions etc.
-    # indicating the location of the player himself
+    crates_arena = np.maximum(arena, 0)
+    for (cx, cy) in state['coins']:
+        crates_arena[cx, cy] = 2
+    crates_arena = crates_arena.T
 
-    if not is_conv:
-        if self_xy in bombs:
-            arena[self_xy] = 5
-        else:
-            arena[self_xy] = 3
+    x, y, _, bombs_left, _ = state['self']
+    bombs = state['bombs']
+    others = [(xo, yo) for (xo, yo, _, _, _) in state['others']]
 
-        # indicating the location of the remaining opponents
-        for opponent in others:
-            arena[opponent] = 2
-
-        for coin in coins:
-            arena[coin] = 4
-
-        for bomb_idx, bomb in enumerate(bombs):
-            if bomb != self_xy:
-                arena[bomb] = (bombs_times[bomb_idx] + 1) * 10
-
-        explosions_locations = np.nonzero(explosions)
-        arena[explosions_locations] = explosions[explosions_locations] * 100
-
-        return arena.T.flatten().reshape((-1,289))
+    # First Information: Direction to nearest coin
+    diglist = list()
+    if len(state['coins']) == 0:
+        diglist.append(0)
     else:
-        #layer_1 is the arena
-        agents_layer = np.zeros((17,17))
-        bombs_layer = np.zeros((17, 17))
-        explosions_layer = np.zeros((17, 17))
+        closest_coin = sorted(state['coins'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
+        best_orientation = np.argmin([(closest_coin[0] - mx)**2 + (closest_coin[1] - my)**2 for (mx, my) in
+                                      [(x, y-1), (x-1, y-1), (x-1, y), (x-1, y+1),
+                                       (x, y+1), (x+1, y+1), (x+1, y), (x+1, y-1)]]) + 1
+        diglist.append(best_orientation)
 
-        for coin in coins:
-            arena[coin] = 5
+    # Second Information: Direction to more crates
+    if np.sum(crates_arena) == 0:
+        diglist.append(0)
+    else:
+        q1map = np.sum(crates_arena[1:6, 1:6])
+        q2map = np.sum(crates_arena[1:6, 6:11])
+        q3map = np.sum(crates_arena[1:6, 11:16])
+        q4map = np.sum(crates_arena[6:11, 1:6])
+        q5map = np.sum(crates_arena[6:11, 6:11])
+        q6map = np.sum(crates_arena[6:11, 11:16])
+        q7map = np.sum(crates_arena[11:16, 1:6])
+        q8map = np.sum(crates_arena[11:16, 6:11])
+        q9map = np.sum(crates_arena[11:16, 11:16])
+        diglist.append(np.argmax([q1map, q2map, q3map, q4map, q5map, q6map, q7map, q8map, q9map]) + 1)
 
-        for other in others:
-            agents_layer[other] = 2
-        agents_layer[self_xy] = 3
+    # Thrid Information: Direction to nearest opponent
+    if len(state['others']) == 0:
+        diglist.append(0)
+    else:
+        closest_p = sorted(state['others'], key=lambda k: abs(k[0] - x) + abs(k[1] - y))[0]
+        closest_orientation = np.argmin([abs(closest_p[0] - mx) + abs(closest_p[1] - my) for (mx, my) in
+                                         [(x, y - 1), (x - 1, y - 1), (x - 1, y), (x - 1, y + 1), (x, y + 1),
+                                          (x + 1, y + 1), (x + 1, y), (x + 1, y - 1)]]) + 1
+        diglist.append(closest_orientation)
 
-        for bomb_idx, bomb in enumerate(bombs):
-            bombs_layer[bomb] = 4
+    # Fourth Information: Number of bombs available
+    diglist.append(bombs_left)
 
-        explosions_locations = np.nonzero(explosions)
-        explosions_layer[explosions_locations] = explosions[explosions_locations] * 100
+    # 5-45th Information: Information in the 4-step vision
+    for (i, j) in [( 0, -4), (-1, -3), ( 0, -3), ( 1, -3),
+                   (-2, -2), (-1, -2), ( 0, -2), ( 1, -2), ( 2, -2),
+                   (-3, -1), (-2, -1), (-1, -1), ( 0, -1), ( 1, -1),
+                   ( 2, -1), ( 3, -1), (-4,  0), (-3,  0), (-2,  0),
+                   (-1,  0), (0 ,  0), ( 1,  0), ( 2,  0), ( 3,  0),
+                   ( 4,  0), (-3,  1), (-2,  1), (-1,  1), ( 0,  1),
+                   ( 1,  1), ( 2,  1), ( 3,  1), (-2,  2), (-1,  2),
+                   ( 0,  2), ( 1,  2), ( 2,  2), (-1,  3), ( 0,  3),
+                   ( 1,  3), ( 0,  4)]:
 
-        arena = arena.transpose().copy()
-        agents_layer = agents_layer.transpose().copy()
-        bombs_layer = bombs_layer.transpose().copy()
-        explosions_layer = explosions_layer.transpose().copy()
-        new_state = np.stack((arena,agents_layer,bombs_layer,explosions_layer),axis=2)
-        return new_state
+        if (x + i) < 0 or (x + i) > 16 or (y + j) < 0 or (y + j) > 16:
+            diglist.append(0)
+        elif (x + i, y + j) in state['coins']:
+            diglist.append(300)
+        elif state['explosions'][x + i, y + j] == 1:
+            diglist.append(10)
+        elif state['explosions'][x + i, y + j] == 2:
+            diglist.append(9)
+        elif (x + i, y + j, 4) in bombs:
+            if (x + i, y + j) in others:
+                diglist.append(40)
+            else:
+                diglist.append(4)
+        elif (x + i, y + j, 3) in bombs:
+            if (x + i, y + j) in others:
+                diglist.append(50)
+            else:
+                diglist.append(5)
+        elif (x + i, y + j, 2) in bombs:
+            if (x + i, y + j) in others:
+                diglist.append(60)
+            else:
+                diglist.append(6)
+        elif (x + i, y + j, 1) in bombs:
+            if (x + i, y + j) in others:
+                diglist.append(70)
+            else:
+                diglist.append(7)
+        elif (x + i, y + j, 0) in bombs:
+            if (x + i, y + j) in others:
+                diglist.append(80)
+            else:
+                diglist.append(8)
+        elif (x + i, y + j) in others:
+                diglist.append(100)
+        else:
+            diglist.append(arena[x + i, y + j] + 1)  # 0, 1, 2
 
-def compute_reward(agent):
-    total_reward = 0
-    events = agent.events
-    for event in events:
-        total_reward += list(rewards.values())[event]
+    state = np.array(diglist)
+    return state.reshape((1, 45))
 
-    return total_reward
-#
-#
-# def train(agent):
-#     inputs = np.array(agent.experience.get_inputs()).reshape((-1,289))
-#     targets = np.array(agent.experience.get_targets())
-#     print(f'Start training after round number: {agent.experience.rounds_count}')
-#     start = time.time()
-#     agent.training_history = agent.experience.model.fit(x=inputs,y=targets,validation_split=0.1,batch_size=16,epochs=10,verbose=1,callbacks=[agent.ckpt,agent.tb])
-#     end = time.time()
-#     print(f'Finish training after round number: {agent.experience.rounds_count}, time elapsed: {end-start}')
-#     is_save = True if agent.experience.rounds_count % 1000 == 0 else False
-#     if is_save:
-#         saved_model_path = os.path.join(agent.config['training']['models_folder'],
-#                  agent.config['training']['save_model'])
-#         agent.experience.model.save(saved_model_path)
+
+def train(agent, train_tick=0, exit_game=False):
+    """
+    This function train the evaluation network by replaying experience
+    :param agent        : Agent used to interact with the Environment
+    :param train_tick   : Number tick indicating the number of rounds
+    :param exit_game    : Flag indicating the end of episode
+    :return:
+    """
+    inputs, targets = agent.experience.get_inputs_targets(agent.model)
+    start = time.time()
+    agent.training_loss = agent.model.train_on_batch(x=inputs, y=targets)
+    end = time.time()
+
+    is_save = True if agent.experience.rounds_count % agent.config['model_config']['save_freq'] == 0 or agent.experience.rounds_count == s.n_rounds else False
+    if is_save and exit_game:
+        print('Finish training after round number: {}, step number: {}, time elapsed: {}'.format(agent.experience.rounds_count, agent.game_state['step'], end-start))
+        print('last eps: {}'.format(agent.eps))
+        newname = agent.config['training']['save_model'] + str(int(agent.olddig) + train_tick) + '_model.h5'
+        saved_model_path = os.path.join(agent.config['training']['models_folder'], newname)
+        agent.model.save(saved_model_path)

@@ -1,20 +1,25 @@
 {
   "training":{
-    "models_folder":"agent_code/dawas_tang/models/ckpt",
-    "model_name":"first_conv_model_coins.h5",
-    "save_model":"first_conv_model_coins.h5",
-    "weights_path":"",
-    "pretrained":1,
-    "max_memory_size": 5000,
-    "conv": 1,
-    "reset_interval": 1000
+    "models_folder":"agent_code/dawas_tang/models",
+    "model_name":"warmcrates0_",
+    "save_model":"warmcrates0_",
+    "weights_path":""
   },
-  "playing":{
-    "eps":1.0,
-    "eps_discount":0.99
+  "playing": {
+    "models_folder": "agent_code/dawas_tang/models",
+    "model_name": "dt_task3_model.h5"
+  },
+  "model_config":{
+    "eps":0.99,
+    "gamma": 0.7,
+    "eps_discount":0.999,
+    "update_freq": 2,
+    "save_freq": 50
   },
   "workflow":{
     "train":0,
-    "simple_train":0
+    "pretrained":1
   }
 }
+
+
