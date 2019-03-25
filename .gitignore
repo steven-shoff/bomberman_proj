@@ -112,7 +112,6 @@ screenshots/*.webm
 replays/
 
 # models
-agent_code/dawas_tang/models/*
 agent_code/local_agent/models/*
 agent_code/blind_agent/models/*
 settings.py
